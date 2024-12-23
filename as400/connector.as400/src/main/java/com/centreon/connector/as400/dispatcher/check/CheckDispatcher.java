@@ -50,6 +50,7 @@ import com.centreon.connector.as400.check.handler.msgqueue.CachedMessageQueueHan
 import com.centreon.connector.as400.check.handler.msgqueue.MessageQueueHandler;
 import com.centreon.connector.as400.check.handler.wrkprb.WorkWithProblemHandler;
 import com.centreon.connector.as400.client.impl.NetworkClient;
+import com.centreon.connector.as400.ConnectorLogger;
 
 import io.undertow.server.HttpServerExchange;
 
@@ -129,6 +130,7 @@ public class CheckDispatcher {
                 final NetworkClient client = runnable.getClient();
                 final String rawRequest = client.getRawRequest();
 
+                ConnectorLogger.getInstance().info("[Debug] client remove raw request: " + rawRequest);
                 CheckDispatcher.this.filter.remove(rawRequest);
             }
             super.afterExecute(r, t);
@@ -168,12 +170,15 @@ public class CheckDispatcher {
     public synchronized void dispatch(final NetworkClient client) {
 
         if (this.filter.containsKey(client.getRawRequest())) {
+            ConnectorLogger.getInstance().info("[Debug] client delayed raw request: " + client.getRawRequest());
             final long time = this.filter.get(client.getRawRequest());
             client.writeAnswer(new ResponseData(ResponseData.statusError, "Previous request pending (started "
                     + (System.currentTimeMillis() - time)
                     + " ms ago). Increase your check interval, and nagios check timeout. Also check your bandwidth availability"));
             return;
         }
+
+        ConnectorLogger.getInstance().info("[Debug] client put raw request: " + client.getRawRequest());
 
         this.filter.put(client.getRawRequest(), System.currentTimeMillis());
 
