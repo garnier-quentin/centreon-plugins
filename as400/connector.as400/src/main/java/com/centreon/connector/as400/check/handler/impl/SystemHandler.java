@@ -181,6 +181,8 @@ public class SystemHandler extends AbstractHandler implements ISystemHandler {
         attrs.put("batchJobWaitingToRunOrAlreadyScheduled", this.status.getBatchJobsWaitingToRunOrAlreadyScheduled());
         data.getResult().add(attrs);
 
+        this.status.reset();
+
         return data;
     }
 
