@@ -119,6 +119,7 @@ sub settings {
     my ($self, %options) = @_;
 
     return if (defined($self->{settings_done}));
+    $self->{option_results}->{hostname} = '';
     $self->{http}->set_options(%{$self->{option_results}});
     $self->{http}->add_header(key => 'Accept', value => 'application/json');
     $self->{http}->add_header(key => 'Content-Type', value => 'application/json');
@@ -250,8 +251,14 @@ sub request_api {
 
     $self->settings();
     my $token = $self->get_token();
+
+    my $endpoint = $options{endpoint};
+    if (defined($options{endpoint_type})) {
+        $endpoint = $self->get_endpoint(type => 'compute') . $options{endpoint};
+    }
+
     my ($content) = $self->{http}->request(
-        full_url => $options{endpoint},
+        full_url => $endpoint,
         get_param => $options{get_param},
         header => ['X-Auth-Token: ' . $token],
         unknown_status => '',
@@ -263,8 +270,14 @@ sub request_api {
     if ($self->{http}->get_code() < 200 || $self->{http}->get_code() >= 300) {
         $self->clean_token();
         $token = $self->get_token();
+
+        $endpoint = $options{endpoint};
+        if (defined($options{endpoint_type})) {
+            $endpoint = $self->get_endpoint(type => 'compute') . $options{endpoint};
+        }
+
         $content = $self->{http}->request(
-            full_url => $options{endpoint},
+            full_url => $endpoint,
             get_param => $options{get_param},
             header => ['X-Auth-Token: ' . $token],
             unknown_status => $self->{unknown_http_status},
@@ -294,29 +307,32 @@ sub request {
     my ($self, %options) = @_;
 
     my $datas = [];
+    my $endpoint_type = $options{endpoint_type};
     my $endpoint = $options{endpoint};
     my $get_param = $options{get_param};
     while (defined($endpoint)) {
         my $result = $self->request_api(
+            endpoint_type => $endpoint_type,
             endpoint => $endpoint,
             get_param => $get_param
         );
+        $endpoint_type = undef;
         $endpoint = undef;
 
         foreach (@{$result->{ $options{data_attr} }}) {
             my $entry = {};
-            foreach my $attr (@$options{read_attrs}) {
-                next if (!defined($_->{$attr));
+            foreach my $attr (@{$options{read_attrs}}) {
+                next if (!defined($_->{$attr}));
                 
-                $entry->{$attr} = $_->{$attr);
+                $entry->{$attr} = $_->{$attr};
             }
 
             push @$datas, $entry;
         }
 
 
-        if (defined($result->{ $options{page_attr} })) {
-            foreach (@{$result->{ $options{page_attr} }}) {
+        if (defined($result->{ $options{paging_attr} })) {
+            foreach (@{$result->{ $options{paging_attr} }}) {
                 if ($_->{rel} eq 'next') {
                     $endpoint = $_->{href};
                     $get_param = undef;
@@ -368,12 +384,12 @@ sub get_servers {
     return $self->get_cache_file_response(statefile => 'servers')
         if (defined($self->{option_results}->{cache_use}) && !defined($options{disable_cache}));
 
-    my $endpoint = $self->get_endpoint(type => 'compute');
     my $datas = $self->request(
-        endpoint => $endpoint . '/servers/detail',
+        endpoint_type => 'compute',
+        endpoint => '/servers/detail',
         data_attr => 'servers',
         paging_attr => 'servers_links',
-        read_attrs => ['id', 'name', 'status', 'tenant_id', 'OS-EXT-STS:vm_state', 'OS-EXT-STS:power_state' ]
+        read_attrs => ['id', 'name', 'status', 'tenant_id', 'OS-EXT-STS:vm_state', 'OS-EXT-STS:power_state', 'OS-EXT-AZ:availability_zone']
     );
 
     return $datas;
