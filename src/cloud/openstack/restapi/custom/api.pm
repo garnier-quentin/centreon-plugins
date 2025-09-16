@@ -136,6 +136,8 @@ sub clean_token {
 sub get_endpoint {
     my ($self, %options) = @_;
 
+    return $self->{option_results}->{identity_endpoint} if ($options{type} eq 'identity');
+
     return $self->{option_results}->{$options{type} . '_endpoint'}  
         if (defined($self->{option_results}->{$options{type} . '_endpoint'}) && 
             $self->{option_results}->{$options{type} . '_endpoint'} ne '');
@@ -254,7 +256,7 @@ sub request_api {
 
     my $endpoint = $options{endpoint};
     if (defined($options{endpoint_type})) {
-        $endpoint = $self->get_endpoint(type => 'compute') . $options{endpoint};
+        $endpoint = $self->get_endpoint(type => $options{endpoint_type}) . $options{endpoint};
     }
 
     my ($content) = $self->{http}->request(
@@ -378,6 +380,18 @@ sub cache_servers {
     return $datas;
 }
 
+sub cache_projects {
+    my ($self, %options) = @_;
+
+    my $datas = $self->get_projects(disable_cache => 1);
+    $self->write_cache_file(
+        statefile => 'projects',
+        response => $datas
+    );
+
+    return $datas;
+}
+
 sub get_servers {
     my ($self, %options) = @_;
 
@@ -390,6 +404,23 @@ sub get_servers {
         data_attr => 'servers',
         paging_attr => 'servers_links',
         read_attrs => ['id', 'name', 'status', 'tenant_id', 'OS-EXT-STS:vm_state', 'OS-EXT-STS:power_state', 'OS-EXT-AZ:availability_zone']
+    );
+
+    return $datas;
+}
+
+sub get_projects {
+    my ($self, %options) = @_;
+
+    return $self->get_cache_file_response(statefile => 'projects')
+        if (defined($self->{option_results}->{cache_use}) && !defined($options{disable_cache}));
+
+    my $datas = $self->request(
+        endpoint_type => 'identity',
+        endpoint => '/v3/auth/projects',
+        data_attr => 'projects',
+        paging_attr => 'projects_links',
+        read_attrs => ['id', 'name']
     );
 
     return $datas;

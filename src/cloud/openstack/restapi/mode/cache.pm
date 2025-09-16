@@ -38,6 +38,7 @@ sub new {
 sub manage_selection {
     my ($self, %options) = @_;
 
+    $options{custom}->cache_projects();
     $options{custom}->cache_servers();
 
     $self->{output}->output_add(
