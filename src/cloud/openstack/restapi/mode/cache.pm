@@ -40,6 +40,7 @@ sub manage_selection {
 
     $options{custom}->cache_projects();
     $options{custom}->cache_servers();
+    $options{custom}->cache_loadbalancers();
 
     $self->{output}->output_add(
         severity => 'OK',

@@ -392,6 +392,18 @@ sub cache_projects {
     return $datas;
 }
 
+sub cache_loadbalancers {
+    my ($self, %options) = @_;
+
+    my $datas = $self->get_loadbalancers(disable_cache => 1);
+    $self->write_cache_file(
+        statefile => 'loadbalancers',
+        response => $datas
+    );
+
+    return $datas;
+}
+
 sub get_servers {
     my ($self, %options) = @_;
 
@@ -420,6 +432,23 @@ sub get_projects {
         endpoint => '/v3/auth/projects',
         data_attr => 'projects',
         paging_attr => 'projects_links',
+        read_attrs => ['id', 'name']
+    );
+
+    return $datas;
+}
+
+sub get_loadbalancers {
+    my ($self, %options) = @_;
+
+    return $self->get_cache_file_response(statefile => 'loadbalancers')
+        if (defined($self->{option_results}->{cache_use}) && !defined($options{disable_cache}));
+
+    my $datas = $self->request(
+        endpoint_type => 'loadbalancers',
+        endpoint => '/v2/lbaas/loadbalancers',
+        data_attr => 'loadbalancers',
+        paging_attr => 'loadbalancers_links',
         read_attrs => ['id', 'name']
     );
 
