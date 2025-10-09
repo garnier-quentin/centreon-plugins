@@ -445,7 +445,7 @@ sub get_loadbalancers {
         if (defined($self->{option_results}->{cache_use}) && !defined($options{disable_cache}));
 
     my $datas = $self->request(
-        endpoint_type => 'loadbalancers',
+        endpoint_type => 'loadbalancer',
         endpoint => '/v2/lbaas/loadbalancers',
         data_attr => 'loadbalancers',
         paging_attr => 'loadbalancers_links',
