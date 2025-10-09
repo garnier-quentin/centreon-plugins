@@ -236,9 +236,9 @@ sub get_token {
             header => ['Content-Type: application/json']
         );
 
-        $token = $self->{http}->get_header(name => 'x-subject-token');
+        my $ntoken = $self->{http}->get_header(name => 'x-subject-token');
 
-        if (!defined($token)) {
+        if (!defined($ntoken)) {
             $self->{output}->add_option_msg(short_msg => "Cannot find token");
             $self->{output}->option_exit();
         }
@@ -271,17 +271,21 @@ sub get_token {
             }
         }
 
-        if (defined($options{project_id})) {
-            $token = {} if (!defined($token));
-            $token->{ $options{project_id} } = $token;
-        }
-
         my $datas = {
             updated => time(),
-            token => $token,
             md5_secret => $md5_secret,
             endpoints => $endpoints
         };
+
+        if (defined($options{project_id})) {
+            $token = {} if (!defined($token));
+            $token->{ $options{project_id} } = $ntoken;
+            $datas->{token} = $token;
+        } else {
+            $datas->{token} = $ntoken;
+            $token = $ntoken;
+        }
+        
         $self->{'cache_connect_' . $token_type}->write(data => $datas);
     }
 
@@ -303,6 +307,10 @@ sub request_api {
     my $endpoint = $options{endpoint};
     if (defined($options{endpoint_type})) {
         $endpoint = $self->get_endpoint(type => $options{endpoint_type}) . $options{endpoint};
+    }
+
+    if (!defined($token)) {
+        print "===$endpoint==\n";
     }
 
     my ($content) = $self->{http}->request(
@@ -360,6 +368,7 @@ sub request {
     my $get_param = $options{get_param};
     while (defined($endpoint)) {
         my $result = $self->request_api(
+            project_id => $options{project_id},
             endpoint_type => $endpoint_type,
             endpoint => $endpoint,
             get_param => $get_param
@@ -417,9 +426,9 @@ sub get_cache_file_response {
 sub cache_servers {
     my ($self, %options) = @_;
 
-    my $datas = $self->get_servers(disable_cache => 1);
+    my $datas = $self->get_servers(disable_cache => 1, project_id => $options{project_id});
     $self->write_cache_file(
-        statefile => 'servers',
+        statefile => 'servers_' . $options{project_id},
         response => $datas
     );
 
@@ -453,10 +462,11 @@ sub cache_loadbalancers {
 sub get_servers {
     my ($self, %options) = @_;
 
-    return $self->get_cache_file_response(statefile => 'servers')
+    return $self->get_cache_file_response(statefile => 'servers_' . $options{project_id})
         if (defined($self->{option_results}->{cache_use}) && !defined($options{disable_cache}));
 
     my $datas = $self->request(
+        project_id => $options{project_id},
         endpoint_type => 'compute',
         endpoint => '/servers/detail',
         data_attr => 'servers',
