@@ -61,8 +61,10 @@ sub new {
 
     $self->{output} = $options{output};
     $self->{http} = centreon::plugins::http->new(%options, default_backend => 'curl');
-    $self->{cache_connect} = centreon::plugins::statefile->new(%options);
+    $self->{cache_connect_unscoped} = centreon::plugins::statefile->new(%options);
+    $self->{cache_connect_scoped} = centreon::plugins::statefile->new(%options);
     $self->{cache} = centreon::plugins::statefile->new(%options);
+    $self->{tokens} = {};
     
     return $self;
 }
@@ -103,7 +105,8 @@ sub check_options {
         $self->{output}->option_exit();
     }
 
-    $self->{cache_connect}->check_options(option_results => $self->{option_results});
+    $self->{cache_connect_unscoped}->check_options(option_results => $self->{option_results});
+    $self->{cache_connect_scoped}->check_options(option_results => $self->{option_results});
     $self->{cache}->check_options(option_results => $self->{option_results});
 
     return 0;
@@ -129,8 +132,10 @@ sub settings {
 sub clean_token {
     my ($self, %options) = @_;
 
+    $self->{tokens} = {};
     my $datas = { updated => time() };
-    $self->{cache_connect}->write(data => $datas);
+    $self->{cache_connect_unscoped}->write(data => $datas);
+    $self->{cache_connect_scoped}->write(data => $datas);
 }
 
 sub get_endpoint {
@@ -142,8 +147,8 @@ sub get_endpoint {
         if (defined($self->{option_results}->{$options{type} . '_endpoint'}) && 
             $self->{option_results}->{$options{type} . '_endpoint'} ne '');
 
-    my $has_cache_file = $self->{cache_connect}->read(statefile => 'openstack_' . md5_hex($self->get_connection_info()));
-    my $endpoints = $self->{cache_connect}->get(name => 'endpoints');
+    my $has_cache_file = $self->{cache_connect_unscoped}->read(statefile => 'openstack_' . md5_hex($self->get_connection_info() . 'unscoped'));
+    my $endpoints = $self->{cache_connect_unscoped}->get(name => 'endpoints');
 
     return $endpoints->{$options{type}}
         if (defined($endpoints->{$options{type}}) && 
@@ -156,31 +161,61 @@ sub get_endpoint {
 sub get_token {
     my ($self, %options) = @_;
 
-    my $has_cache_file = $self->{cache_connect}->read(statefile => 'openstack_' . md5_hex($self->get_connection_info()));
-    my $token = $self->{cache_connect}->get(name => 'token');
-    my $md5_secret_cache = $self->{cache_connect}->get(name => 'md5_secret');
+    # avoid to read the statefile for each calls
+    my $token_type = 'unscoped';
+    my $project_id = '';
+    if (defined($options{project_id}) && $options{project_id} ne '') {
+        $token_type = 'scoped';
+        $project_id = $options{project_id};
+    }
+
+    if (defined($self->{tokens}->{$token_type . $project_id})) {
+        return $self->{tokens}->{$token_type . $project_id};
+    }
+
+    my $has_cache_file = $self->{'cache_connect_' . $token_type}->read(statefile => 'openstack_' . md5_hex($self->get_connection_info() . $token_type));
+    my $token = $self->{'cache_connect_' . $token_type}->get(name => 'token');
+    my $md5_secret_cache = $self->{'cache_connect_' . $token_type}->get(name => 'md5_secret');
     my $md5_secret = md5_hex($self->{api_username} . $self->{api_password});
 
     if ($has_cache_file == 0 ||
         !defined($token) ||
+        (defined($options{project_id}) && (!defined($token->{ $options{project_id} }))) ||
         (defined($md5_secret_cache) && $md5_secret_cache ne $md5_secret)
         ) {
-        my $json_request = {
-            auth => {
-                identity => {
-                    methods => ['password'],
-                },
-                password => {
-                    user => {
-                        name => $self->{api_username},
-                        domain => {
-                            name => $self->{api_domain}
-                        },
-                        password => $self->{api_password}
+        my $json_request;
+        if (defined($options{project_id})) {
+            $json_request = {
+                auth => {
+                    identity => {
+                        methods => ['token'],
+                        token => { id => $self->get_token() }
+                    },
+                    scope => {
+                        project => {
+                            id => $options{project_id}
+                        }
                     }
                 }
-            }
-        };
+            };
+        } else {
+            $json_request = {
+                auth => {
+                    identity => {
+                        methods => ['password'],
+                    },
+                    password => {
+                        user => {
+                            name => $self->{api_username},
+                            domain => {
+                                name => $self->{api_domain}
+                            },
+                            password => $self->{api_password}
+                        }
+                    }
+                }
+            };
+        }
 
         my $encoded;
         eval {
@@ -222,7 +257,7 @@ sub get_token {
             loadbalancer => '',
             network => ''
         };
-        if (defined($decoded->{token}->{catalog})) {
+        if (!defined($options{project_id}) && defined($decoded->{token}->{catalog})) {
             foreach my $catalog (@{$decoded->{token}->{catalog}}) {
                 $catalog->{type} =~ s/-//g;
 
@@ -236,23 +271,34 @@ sub get_token {
             }
         }
 
+        if (defined($options{project_id})) {
+            $token = {} if (!defined($token));
+            $token->{ $options{project_id} } = $token;
+        }
+
         my $datas = {
             updated => time(),
             token => $token,
             md5_secret => $md5_secret,
             endpoints => $endpoints
         };
-        $self->{cache_connect}->write(data => $datas);
+        $self->{'cache_connect_' . $token_type}->write(data => $datas);
     }
 
-    return $token;
+    if (defined($options{project_id})) {
+        $self->{tokens}->{$token_type . $project_id} = $token->{ $options{project_id} };
+    } else {
+        $self->{tokens}->{$token_type . $project_id} = $token;
+    }
+
+    return $self->{tokens}->{$token_type . $project_id};
 }
 
 sub request_api {
     my ($self, %options) = @_;
 
     $self->settings();
-    my $token = $self->get_token();
+    my $token = $self->get_token(project_id => $options{project_id});
 
     my $endpoint = $options{endpoint};
     if (defined($options{endpoint_type})) {
@@ -271,7 +317,7 @@ sub request_api {
     # Maybe token is invalid. so we retry
     if ($self->{http}->get_code() < 200 || $self->{http}->get_code() >= 300) {
         $self->clean_token();
-        $token = $self->get_token();
+        $token = $self->get_token(project_id => $options{project_id});
 
         $endpoint = $options{endpoint};
         if (defined($options{endpoint_type})) {

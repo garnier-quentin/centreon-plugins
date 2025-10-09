@@ -38,7 +38,9 @@ sub new {
 sub manage_selection {
     my ($self, %options) = @_;
 
-    $options{custom}->cache_projects();
+    my $projects = $options{custom}->cache_projects();
+    use Data::Dumper; print Data::Dumper::Dumper($projects);
+    exit(0);
     $options{custom}->cache_servers();
     $options{custom}->cache_loadbalancers();
 
