@@ -163,7 +163,7 @@ sub get_token {
 
     # avoid to read the statefile for each calls
     my $token_type = 'unscoped';
-    my $project_id = '';
+    my $project_id = 'none';
     if (defined($options{project_id}) && $options{project_id} ne '') {
         $token_type = 'scoped';
         $project_id = $options{project_id};
@@ -180,7 +180,7 @@ sub get_token {
 
     if ($has_cache_file == 0 ||
         !defined($token) ||
-        (defined($options{project_id}) && (!defined($token->{ $options{project_id} }))) ||
+        !defined($token->{$project_id}) ||
         (defined($md5_secret_cache) && $md5_secret_cache ne $md5_secret)
         ) {
         my $json_request;
@@ -271,29 +271,19 @@ sub get_token {
             }
         }
 
+        $token = {} if (!defined($token));
+        $token->{$project_id} = $ntoken;
+
         my $datas = {
             updated => time(),
+            token => $token,
             md5_secret => $md5_secret,
             endpoints => $endpoints
         };
-
-        if (defined($options{project_id})) {
-            $token = {} if (!defined($token));
-            $token->{ $options{project_id} } = $ntoken;
-            $datas->{token} = $token;
-        } else {
-            $datas->{token} = $ntoken;
-            $token = $ntoken;
-        }
-        
         $self->{'cache_connect_' . $token_type}->write(data => $datas);
     }
 
-    if (defined($options{project_id})) {
-        $self->{tokens}->{$token_type . $project_id} = $token->{ $options{project_id} };
-    } else {
-        $self->{tokens}->{$token_type . $project_id} = $token;
-    }
+    $self->{tokens}->{$token_type . $project_id} = $token->{$project_id};
 
     return $self->{tokens}->{$token_type . $project_id};
 }
@@ -307,10 +297,6 @@ sub request_api {
     my $endpoint = $options{endpoint};
     if (defined($options{endpoint_type})) {
         $endpoint = $self->get_endpoint(type => $options{endpoint_type}) . $options{endpoint};
-    }
-
-    if (!defined($token)) {
-        print "===$endpoint==\n";
     }
 
     my ($content) = $self->{http}->request(
@@ -404,7 +390,7 @@ sub request {
 sub write_cache_file {
     my ($self, %options) = @_;
 
-    $self->{cache}->read(statefile => 'cache_openstack_' . $options{statefile} . '_' . md5_hex($self->get_connection_info()));
+    $self->{cache}->read(statefile => 'openstack_' . $options{statefile} . '_' . md5_hex($self->get_connection_info()));
     $self->{cache}->write(data => {
         update_time => time(),
         response => $options{response}
@@ -414,7 +400,7 @@ sub write_cache_file {
 sub get_cache_file_response {
     my ($self, %options) = @_;
 
-    $self->{cache}->read(statefile => 'cache_openstack_' . $options{statefile} . '_' . md5_hex($self->get_connection_info()));
+    $self->{cache}->read(statefile => 'openstack_' . $options{statefile} . '_' . md5_hex($self->get_connection_info()));
     my $response = $self->{cache}->get(name => 'response');
     if (!defined($response)) {
         $self->{output}->add_option_msg(short_msg => 'Cache file missing');
@@ -450,9 +436,9 @@ sub cache_projects {
 sub cache_loadbalancers {
     my ($self, %options) = @_;
 
-    my $datas = $self->get_loadbalancers(disable_cache => 1);
+    my $datas = $self->get_loadbalancers(disable_cache => 1, project_id => $options{project_id});
     $self->write_cache_file(
-        statefile => 'loadbalancers',
+        statefile => 'loadbalancers_' . $options{project_id},
         response => $datas
     );
 
@@ -497,10 +483,11 @@ sub get_projects {
 sub get_loadbalancers {
     my ($self, %options) = @_;
 
-    return $self->get_cache_file_response(statefile => 'loadbalancers')
+    return $self->get_cache_file_response(statefile => 'loadbalancers_' . $options{project_id})
         if (defined($self->{option_results}->{cache_use}) && !defined($options{disable_cache}));
 
     my $datas = $self->request(
+        project_id => $options{project_id},
         endpoint_type => 'loadbalancer',
         endpoint => '/v2/lbaas/loadbalancers',
         data_attr => 'loadbalancers',

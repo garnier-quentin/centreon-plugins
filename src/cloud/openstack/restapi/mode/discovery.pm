@@ -55,28 +55,30 @@ sub check_options {
 sub discovery_server {
     my ($self, %options) = @_;
 
-    my $projects = $options{custom}->get_projects();
-    my $servers = $options{custom}->get_servers();
-
     my $disco_data = [];
-    foreach my $server (@$servers) {
-        my $node = {};
-        $node->{uuid} = $server->{id};
-        $node->{name} = $server->{name};
-        $node->{status} = $server->{status};
-        $node->{vm_state} = $server->{'OS-EXT-STS:vm_state'};
-        $node->{power_state} = $server->{'OS-EXT-STS:power_state'};
-        $node->{availability_zone} = $server->{'OS-EXT-AZ:availability_zone'};
+    my $projects = $options{custom}->get_projects();
+    foreach (@$projects) {
+        my $servers = $options{custom}->get_servers(project_id => $_->{id});
 
-        my $tenant_name = '';
-        foreach (@$projects) {
-            if ($_->{id} eq $server->{tenant_id}) {
-                $tenant_name = $_->{name};
+        foreach my $server (@$servers) {
+            my $node = {};
+            $node->{uuid} = $server->{id};
+            $node->{name} = $server->{name};
+            $node->{status} = $server->{status};
+            $node->{vm_state} = $server->{'OS-EXT-STS:vm_state'};
+            $node->{power_state} = $server->{'OS-EXT-STS:power_state'};
+            $node->{availability_zone} = $server->{'OS-EXT-AZ:availability_zone'};
+
+            my $tenant_name = '';
+            foreach (@$projects) {
+                if ($_->{id} eq $server->{tenant_id}) {
+                    $tenant_name = $_->{name};
+                }
             }
-        }
-        $node->{project_name} = $tenant_name;
+            $node->{project_name} = $tenant_name;
 
-        push @$disco_data, $node;
+            push @$disco_data, $node;
+        }
     }
 
     return $disco_data;
