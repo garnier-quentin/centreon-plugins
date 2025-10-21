@@ -107,11 +107,21 @@ sub prefix_global_output {
     return 'Number of load balancers ';
 }
 
+sub prefix_project_output {
+    my ($self, %options) = @_;
+
+    return sprintf(
+        "Project '%s' number of load balancers ",
+        $options{instance_value}->{projectName}
+    );
+}
+
 sub set_counters {
     my ($self, %options) = @_;
 
     $self->{maps_counters_type} = [
         { name => 'global', type => 0, cb_prefix_output => 'prefix_global_output' },
+        { name => 'projects', type => 1, cb_prefix_output => 'prefix_project_output', message_multiple => 'All projects are ok', skipped_code => { -10 => 1 } },
         {
             name => 'lbs', type => 3, cb_prefix_output => 'prefix_lb_output', cb_long_output => 'lb_long_output', indent_long_output => '    ', message_multiple => 'All load balancers are ok',
             group => [
@@ -124,7 +134,7 @@ sub set_counters {
     ];
 
     $self->{maps_counters}->{global} = [
-        { label => 'load-balancers-detected', display_ok => 0, nlabel => 'loadbalancers.detected.count', set => {
+        { label => 'lbs-detected', display_ok => 0, nlabel => 'loadbalancers.detected.count', set => {
                 key_values => [ { name => 'detected' } ],
                 output_template => 'detected: %s',
                 perfdatas => [
@@ -133,6 +143,23 @@ sub set_counters {
             }
         }
     ];
+
+    $self->{maps_counters}->{projects} = [];
+    foreach my $status (('online', 'draining', 'offline', 'degraded', 'error', 'no_monitor')) {
+        my $status_help = $status;
+        $status_help =~ s/_//g;
+        push @{$self->{maps_counters}->{projects}},
+            {
+                label => 'project-lbs-opstatus-' . $status_help, display_ok => 0, nlabel => 'project.loadbalancers.operating_status.' . $status . '.count',
+                set => {
+                    key_values => [ { name => $status }, { name => 'total' }, { name => 'projectName' } ],
+                    output_template => $status . ': %s',
+                    perfdatas => [
+                        { template => '%s', min => 0, max => 'total', label_extra_instance => 1, instance_use => 'projectName' }
+                    ]
+                }
+            };
+    }
 
     $self->{maps_counters}->{health} = [
         {
@@ -151,7 +178,7 @@ sub set_counters {
     ];
 
     $self->{maps_counters}->{connection} = [
-         { label => 'connections-active', nlabel => 'loadbalancer.connections.active.count', set => {
+        { label => 'connections-active', nlabel => 'loadbalancer.connections.active.count', set => {
                 key_values => [ { name => 'active' }, { name => 'lbName' }, { name => 'projectName' } ],
                 output_template => 'active: %s',
                 closure_custom_perfdata => $self->can('custom_counter_perfdata')
@@ -224,13 +251,23 @@ sub manage_selection {
     my ($self, %options) = @_;
 
     $self->{global} = { detected => 0 };
+    $self->{projects} = {};
     $self->{lbs} = {};
 
     my $projects = $options{custom}->get_projects();
     foreach my $project (@$projects) {
         next if (defined($self->{option_results}->{filter_project_name}) && $self->{option_results}->{filter_project_name} ne '' &&
             $project->{name} !~ /$self->{option_results}->{filter_project_name}/);
-        
+
+        if (!defined($self->{projects}->{ $project->{id} })) {
+            $self->{projects}->{ $project->{id} } = {
+                projectName => $project->{name},
+                online => 0, draining => 0, offline => 0, 
+                degraded => 0, error => 0, no_monitor => 0,
+                total => 0
+            };
+        }
+
         my $lbs = $options{custom}->get_loadbalancers(project_id => $project->{id});
         
         foreach my $lb (@$lbs) {
@@ -243,8 +280,8 @@ sub manage_selection {
                 health => {
                     lbName => $lb->{name},
                     projectName => $project->{name},
-                    operatingStatus => $lb->{operating_status},
-                    provisioningStatus => $lb->{provisioning_status} 
+                    operatingStatus => lc($lb->{operating_status}),
+                    provisioningStatus => lc($lb->{provisioning_status})
                 },
                 connection => {
                     lbName => $lb->{name},
@@ -269,6 +306,8 @@ sub manage_selection {
             $self->{lbs}->{ $project->{id} . $lb->{id} }->{traffic}->{in} = $stats->[0]->{bytes_in};
             $self->{lbs}->{ $project->{id} . $lb->{id} }->{traffic}->{out} = $stats->[0]->{bytes_out};
 
+            $self->{projects}->{ $project->{id} }->{ lc($lb->{operating_status}) }++;
+            $self->{projects}->{ $project->{id} }->{total}++;
             $self->{global}->{detected}++;
         }
     }
@@ -322,8 +361,10 @@ You can use the following variables: %{operatingStatus}, %{provisioningStatus}, 
 =item B<--warning-*> B<--critical-*>
 
 Thresholds.
-Can be: 'load-balancers-detected', 'connections-active', 'connections-total',
-'requests-error', 'traffic-in', 'traffic-out'.
+Can be: 'lbs-detected', 'connections-active', 'connections-total',
+'requests-error', 'traffic-in', 'traffic-out',
+'project-lbs-opstatus-active', 'project-lbs-opstatus-draining', 'project-lbs-opstatus-offline',
+'project-lbs-opstatus-degraded', 'project-lbs-opstatus-error', 'project-lbs-opstatus-nomonitor'.
 
 =back
 
