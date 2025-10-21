@@ -42,6 +42,8 @@ sub manage_selection {
     foreach (@$projects) {
         $options{custom}->cache_servers(project_id => $_->{id});
         $options{custom}->cache_loadbalancers(project_id => $_->{id});
+        $options{custom}->cache_networks(project_id => $_->{id});
+        $options{custom}->cache_ports(project_id => $_->{id});
     }
     
     $self->{output}->output_add(

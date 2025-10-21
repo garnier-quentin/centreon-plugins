@@ -315,7 +315,7 @@ sub request_api {
 
         $endpoint = $options{endpoint};
         if (defined($options{endpoint_type})) {
-            $endpoint = $self->get_endpoint(type => 'compute') . $options{endpoint};
+            $endpoint = $self->get_endpoint(type => $options{endpoint_type}) . $options{endpoint};
         }
 
         $content = $self->{http}->request(
@@ -449,6 +449,30 @@ sub cache_loadbalancers {
     return $datas;
 }
 
+sub cache_networks {
+    my ($self, %options) = @_;
+
+    my $datas = $self->get_networks(disable_cache => 1, project_id => $options{project_id});
+    $self->write_cache_file(
+        statefile => 'networks_' . $options{project_id},
+        response => $datas
+    );
+
+    return $datas;
+}
+
+sub cache_ports {
+    my ($self, %options) = @_;
+
+    my $datas = $self->get_ports(disable_cache => 1, project_id => $options{project_id});
+    $self->write_cache_file(
+        statefile => 'ports_' . $options{project_id},
+        response => $datas
+    );
+
+    return $datas;
+}
+
 sub get_servers {
     my ($self, %options) = @_;
 
@@ -511,6 +535,42 @@ sub get_loadbalancer_stats {
         endpoint => '/v2/lbaas/loadbalancers/' . $options{lb_id} . '/stats',
         data_attr => 'stats',
         read_attrs => ['bytes_in', 'bytes_out', 'active_connections', 'total_connections', 'request_errors']
+    );
+
+    return $datas;
+}
+
+sub get_networks {
+    my ($self, %options) = @_;
+
+    return $self->get_cache_file_response(statefile => 'networks_' . $options{project_id})
+        if (defined($self->{option_results}->{cache_use}) && !defined($options{disable_cache}));
+
+    my $datas = $self->request(
+        project_id => $options{project_id},
+        endpoint_type => 'network',
+        endpoint => '/v2.0/networks',
+        data_attr => 'networks',
+        paging_attr => 'networks_links',
+        read_attrs => ['id', 'name', 'tenant_id', 'status', 'admin_state_up']
+    );
+
+    return $datas;
+}
+
+sub get_ports {
+    my ($self, %options) = @_;
+
+    return $self->get_cache_file_response(statefile => 'ports_' . $options{project_id})
+        if (defined($self->{option_results}->{cache_use}) && !defined($options{disable_cache}));
+
+    my $datas = $self->request(
+        project_id => $options{project_id},
+        endpoint_type => 'network',
+        endpoint => '/v2.0/ports',
+        data_attr => 'ports',
+        paging_attr => 'ports_links',
+        read_attrs => ['id', 'name', 'network_id', 'tenant_id', 'admin_state_up', 'status', 'device_id', 'device_owner']
     );
 
     return $datas;
