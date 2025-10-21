@@ -362,6 +362,10 @@ sub request {
         $endpoint_type = undef;
         $endpoint = undef;
 
+        if (ref($result->{ $options{data_attr} }) eq 'HASH') {
+            $result->{ $options{data_attr} } = [ $result->{ $options{data_attr} } ];
+        }
+
         foreach (@{$result->{ $options{data_attr} }}) {
             my $entry = {};
             foreach my $attr (@{$options{read_attrs}}) {
@@ -374,7 +378,7 @@ sub request {
         }
 
 
-        if (defined($result->{ $options{paging_attr} })) {
+        if (defined($options{paging_attr}) && defined($result->{ $options{paging_attr} })) {
             foreach (@{$result->{ $options{paging_attr} }}) {
                 if ($_->{rel} eq 'next') {
                     $endpoint = $_->{href};
@@ -492,7 +496,21 @@ sub get_loadbalancers {
         endpoint => '/v2/lbaas/loadbalancers',
         data_attr => 'loadbalancers',
         paging_attr => 'loadbalancers_links',
-        read_attrs => ['id', 'name']
+        read_attrs => ['id', 'name', 'provisioning_status', 'operating_status']
+    );
+
+    return $datas;
+}
+
+sub get_loadbalancer_stats {
+    my ($self, %options) = @_;
+
+    my $datas = $self->request(
+        project_id => $options{project_id},
+        endpoint_type => 'loadbalancer',
+        endpoint => '/v2/lbaas/loadbalancers/' . $options{lb_id} . '/stats',
+        data_attr => 'stats',
+        read_attrs => ['bytes_in', 'bytes_out', 'active_connections', 'total_connections', 'request_errors']
     );
 
     return $datas;

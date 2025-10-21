@@ -30,8 +30,9 @@ sub new {
     bless $self, $class;
 
     $self->{modes} = {
-        'cache'     => 'cloud::openstack::restapi::mode::cache',
-        'discovery' => 'cloud::openstack::restapi::mode::discovery'
+        'cache'          => 'cloud::openstack::restapi::mode::cache',
+        'discovery'      => 'cloud::openstack::restapi::mode::discovery',
+        'load-balancers' => 'cloud::openstack::restapi::mode::loadbalancers'
     };
 
     $self->{custom_modes}->{api} = 'cloud::openstack::restapi::custom::api';
