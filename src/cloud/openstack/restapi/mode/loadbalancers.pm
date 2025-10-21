@@ -169,7 +169,7 @@ sub set_counters {
             warning_default => '%{provisioningStatus} =~ /active/i and %{operatingStatus} =~ /degraded/i',
             critical_default => '%{provisioningStatus} =~ /error/i or %{operatingStatus} =~ /error/i',
             set => {
-                key_values => [ { name => 'operatingStatus' },  { name => 'provisioningStatus' }, { name => 'lbName' } ],
+                key_values => [ { name => 'operatingStatus' },  { name => 'provisioningStatus' }, { name => 'lbName' }, { name => 'projectName' } ],
                 closure_custom_output => $self->can('custom_health_output'),
                 closure_custom_perfdata => sub { return 0; },
                 closure_custom_threshold_check => \&catalog_status_threshold_ng
