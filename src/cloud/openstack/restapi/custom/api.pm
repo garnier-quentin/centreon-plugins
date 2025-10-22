@@ -43,18 +43,19 @@ sub new {
     
     if (!defined($options{noptions})) {
         $options{options}->add_options(arguments => {
-            'identity-endpoint:s'     => { name => 'identity_endpoint' },
-            'compute-endpoint:s'      => { name => 'compute_endpoint' },
-            'network-endpoint:s'      => { name => 'network_endpoint' },
-            'loadbalancer-endpoint:s' => { name => 'loadbalancer_endpoint' },
-            'api-username:s'         => { name => 'api_username' },
-            'api-password:s'         => { name => 'api_password' },
+            'identity-endpoint:s'     => { name => 'identity_endpoint', default => '' },
+            'compute-endpoint:s'      => { name => 'compute_endpoint', default => '' },
+            'network-endpoint:s'      => { name => 'network_endpoint', default => '' },
+            'loadbalancer-endpoint:s' => { name => 'loadbalancer_endpoint', default => '' },
+            'api-username:s'         => { name => 'api_username', default => '' },
+            'api-password:s'         => { name => 'api_password', default => '' },
             'api-domain:s'           => { name => 'api_domain' },
             'timeout:s'              => { name => 'timeout' },
             'unknown-http-status:s'  => { name => 'unknown_http_status' },
             'warning-http-status:s'  => { name => 'warning_http_status' },
             'critical-http-status:s' => { name => 'critical_http_status' },
-            'cache-use'              => { name => 'cache_use' }
+            'cache-use'              => { name => 'cache_use' },
+            'cache-lifetime:s'       => { name => 'cache_lifetime', default => '' }
         });
     }
     $options{options}->add_help(package => __PACKAGE__, sections => 'REST API OPTIONS', once => 1);
@@ -80,17 +81,14 @@ sub set_defaults {}
 sub check_options {
     my ($self, %options) = @_;
 
-    $self->{option_results}->{identity_endpoint} = (defined($self->{option_results}->{identity_endpoint})) ? $self->{option_results}->{identity_endpoint} : '';
-    $self->{option_results}->{compute_endpoint} = (defined($self->{option_results}->{compute_endpoint})) ? $self->{option_results}->{compute_endpoint} : '';
-    $self->{option_results}->{network_endpoint} = (defined($self->{option_results}->{network_endpoint})) ? $self->{option_results}->{network_endpoint} : '';
-    $self->{option_results}->{loadbalancer_endpoint} = (defined($self->{option_results}->{loadbalancer_endpoint})) ? $self->{option_results}->{loadbalancer_endpoint} : '';
     $self->{option_results}->{timeout} = (defined($self->{option_results}->{timeout})) ? $self->{option_results}->{timeout} : 50;
     $self->{unknown_http_status} = (defined($self->{option_results}->{unknown_http_status})) ? $self->{option_results}->{unknown_http_status} : '%{http_code} < 200 or %{http_code} >= 300';
     $self->{warning_http_status} = (defined($self->{option_results}->{warning_http_status})) ? $self->{option_results}->{warning_http_status} : '';
     $self->{critical_http_status} = (defined($self->{option_results}->{critical_http_status})) ? $self->{option_results}->{critical_http_status} : '';
-    $self->{api_username} = (defined($self->{option_results}->{api_username})) ? $self->{option_results}->{api_username} : '';
-    $self->{api_password} = (defined($self->{option_results}->{api_password})) ? $self->{option_results}->{api_password} : '';
+    $self->{api_username} = $self->{option_results}->{api_username};
+    $self->{api_password} = $self->{option_results}->{api_password};
     $self->{api_domain} = (defined($self->{option_results}->{api_domain})) ? $self->{option_results}->{api_domain} : 'default';
+    $self->{cache_lifetime} = $self->{option_results}->{cache_lifetime} =~ /(\d+)/ ? $1 : 1800;
 
     if ($self->{option_results}->{identity_endpoint} eq '') {
         $self->{output}->add_option_msg(short_msg => "Need to specify --identity-endpoint option.");
@@ -410,6 +408,13 @@ sub get_cache_file_response {
         $self->{output}->add_option_msg(short_msg => 'Cache file missing');
         $self->{output}->option_exit();
     }
+
+    my $update_time = $self->{cache}->get(name => 'update_time');
+    if ((time() - $self->{cache_lifetime}) > $update_time) {
+        $self->{output}->add_option_msg(short_msg => 'Cache file expired');
+        $self->{output}->option_exit();
+    }
+
     return $response;
 }
 
@@ -624,7 +629,11 @@ Set timeout in seconds (default: 50).
 
 =item B<--cache-use>
 
-Use the cache file (created with cache mode). 
+Use the cache file (created with cache mode).
+
+=item B<--cache-lifetime>
+
+Define the cache lifetime before raising an error (default: 1800 seconds). 
 
 =back
 
