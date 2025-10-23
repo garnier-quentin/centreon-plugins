@@ -46,7 +46,7 @@ sub check_options {
     if (!defined($self->{option_results}->{resource_type}) || $self->{option_results}->{resource_type} eq '') {
         $self->{option_results}->{resource_type} = 'server';
     }
-    if ($self->{option_results}->{resource_type} !~ /^server$/) {
+    if ($self->{option_results}->{resource_type} !~ /^server|loadbalancer$/) {
         $self->{output}->add_option_msg(short_msg => 'unknown resource type');
         $self->{output}->option_exit();
     }
@@ -68,14 +68,30 @@ sub discovery_server {
             $node->{vm_state} = $server->{'OS-EXT-STS:vm_state'};
             $node->{power_state} = $server->{'OS-EXT-STS:power_state'};
             $node->{availability_zone} = $server->{'OS-EXT-AZ:availability_zone'};
+            $node->{project_name} = $_->{name};
 
-            my $tenant_name = '';
-            foreach (@$projects) {
-                if ($_->{id} eq $server->{tenant_id}) {
-                    $tenant_name = $_->{name};
-                }
-            }
-            $node->{project_name} = $tenant_name;
+            push @$disco_data, $node;
+        }
+    }
+
+    return $disco_data;
+}
+
+sub discovery_loadbalancer {
+    my ($self, %options) = @_;
+
+    my $disco_data = [];
+    my $projects = $options{custom}->get_projects();
+    foreach (@$projects) {
+        my $lbs = $options{custom}->get_loadbalancers(project_id => $_->{id});
+
+        foreach my $lb (@$lbs) {
+            my $node = {};
+            $node->{uuid} = $lb->{id};
+            $node->{name} = $lb->{name};
+            $node->{operating_status} = lc($lb->{operating_status});
+            $node->{provisioningStatus} => lc($lb->{provisioning_status});
+            $node->{project_name} = $_->{name};
 
             push @$disco_data, $node;
         }
@@ -95,7 +111,10 @@ sub run {
         $results = $self->discovery_server(
             custom => $options{custom}
         );
-    } else {
+    } elsif ($self->{option_results}->{resource_type} eq 'loadbalancer') {
+        $results = $self->discovery_loadbalancer(
+            custom => $options{custom}
+        );
     }
 
     $disco_stats->{end_time} = time();
@@ -132,7 +151,7 @@ Resources discovery.
 
 =item B<--resource-type>
 
-Choose the type of resources to discover (can be: 'server').
+Choose the type of resources to discover (can be: 'server', 'loadbalancer').
 
 =back
 

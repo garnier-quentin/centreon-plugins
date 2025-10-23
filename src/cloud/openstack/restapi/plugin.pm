@@ -33,6 +33,7 @@ sub new {
         'cache'               => 'cloud::openstack::restapi::mode::cache',
         'discovery'           => 'cloud::openstack::restapi::mode::discovery',
         'list-load-balancers' => 'cloud::openstack::restapi::mode::listloadbalancers',
+        'list-servers'        => 'cloud::openstack::restapi::mode::listservers',
         'load-balancers'      => 'cloud::openstack::restapi::mode::loadbalancers',
         'servers'             => 'cloud::openstack::restapi::mode::servers'
     };

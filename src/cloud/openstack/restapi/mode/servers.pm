@@ -28,6 +28,15 @@ use Time::HiRes;
 use Digest::MD5 qw(md5_hex);
 use centreon::plugins::templates::catalog_functions qw(catalog_status_threshold_ng);
 
+my $map_power_state = {
+    0 => 'noState', 
+    1 => 'running', 
+    3 => 'paused', 
+    4 => 'shutdown', 
+    6 => 'crashed', 
+    7 => 'suspended'
+};
+
 sub custom_cpu_calc {
     my ($self, %options) = @_;
 
@@ -264,13 +273,11 @@ sub set_counters {
     ];
 
     $self->{maps_counters}->{projects} = [];
-=pod
-    foreach my $status (('online', 'draining', 'offline', 'degraded', 'error', 'no_monitor')) {
-        my $status_help = $status;
-        $status_help =~ s/_//g;
+    foreach my $status (values %$map_power_state) {
+        my $status_help = lc($status);
         push @{$self->{maps_counters}->{projects}},
             {
-                label => 'project-lbs-opstatus-' . $status_help, display_ok => 0, nlabel => 'project.loadbalancers.operating_status.' . $status . '.count',
+                label => 'project-servers-power-status-' . $status_help, display_ok => 0, nlabel => 'project.servers.power_status.' . $status . '.count',
                 set => {
                     key_values => [ { name => $status }, { name => 'total' }, { name => 'projectName' } ],
                     output_template => $status . ': %s',
@@ -280,7 +287,6 @@ sub set_counters {
                 }
             };
     }
-=cut
 
     $self->{maps_counters}->{health} = [
         {
@@ -443,15 +449,6 @@ sub get_network {
 sub manage_selection {
     my ($self, %options) = @_;
 
-    my $map_power_state = {
-        0 => 'noState', 
-        1 => 'running', 
-        3 => 'paused', 
-        4 => 'shutdown', 
-        6 => 'crashed', 
-        7 => 'suspended'
-    };
-
     $self->{global} = { detected => 0 };
     $self->{projects} = {};
     $self->{servers} = {};
@@ -461,16 +458,14 @@ sub manage_selection {
         next if (defined($self->{option_results}->{filter_project_name}) && $self->{option_results}->{filter_project_name} ne '' &&
             $project->{name} !~ /$self->{option_results}->{filter_project_name}/);
 
-=pod
         if (!defined($self->{projects}->{ $project->{id} })) {
             $self->{projects}->{ $project->{id} } = {
                 projectName => $project->{name},
-                online => 0, draining => 0, offline => 0, 
-                degraded => 0, error => 0, no_monitor => 0,
+                noState => 0, running => 0, paused => 0, 
+                shutdown => 0, crashed => 0, suspended => 0,
                 total => 0
             };
         }
-=cut
 
         my $servers = $options{custom}->get_servers(project_id => $project->{id});
         my $networks = $options{custom}->get_networks(project_id => $project->{id});
@@ -512,8 +507,8 @@ sub manage_selection {
                 $self->add_stats(custom => $options{custom}, project => $project, server => $server);
             }
 
-            #$self->{projects}->{ $project->{id} }->{ lc($lb->{operating_status}) }++;
-            #$self->{projects}->{ $project->{id} }->{total}++;
+            $self->{projects}->{ $project->{id} }->{ $map_power_state->{ $server->{'OS-EXT-STS:power_state'} } }++;
+            $self->{projects}->{ $project->{id} }->{total}++;
             $self->{global}->{detected}++;
         }
     }
@@ -586,7 +581,10 @@ You can use the following variables: %{portStatus}, %{networkStatus}, %{serverNa
 =item B<--warning-*> B<--critical-*>
 
 Thresholds.
-Can be: 'servers-detected', 'cpu-utilization',
+Can be: 'servers-detected',
+'project-servers-power-status-crashed', 'project-servers-power-status-nostate', 'project-servers-power-status-paused',
+'project-servers-power-status-running', 'project-servers-power-status-shutdown', 'project-servers-power-status-suspended',
+'cpu-utilization',
 'memory-usage', 'memory-usage-free', 'memory-usage-prct',
 'traffic-in', 'traffic-out'.
 
