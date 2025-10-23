@@ -224,9 +224,10 @@ sub new {
     my $self = $class->SUPER::new(package => __PACKAGE__, %options, statefile => 1, force_new_perfdata => 1);
     bless $self, $class;
 
-    $options{options}->add_options(arguments => { 
-        'filter-project-name:s' => { name => 'filter_project_name' },
-        'filter-lb-name:s'      => { name => 'filter_lb_name' }
+    $options{options}->add_options(arguments => {
+        'filter-project-name:s'       => { name => 'filter_project_name' },
+        'filter-lb-name:s'            => { name => 'filter_lb_name' },
+        'custom-perfdata-instances:s' => { name => 'custom_perfdata_instances' }
     });
 
     return $self;

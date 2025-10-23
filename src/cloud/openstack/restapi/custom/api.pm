@@ -360,6 +360,11 @@ sub request {
         $endpoint_type = undef;
         $endpoint = undef;
 
+        # get the raw result (no paging)
+        if (!defined($options{data_attr})) {
+            return $result;
+        }
+
         if (ref($result->{ $options{data_attr} }) eq 'HASH') {
             $result->{ $options{data_attr} } = [ $result->{ $options{data_attr} } ];
         }
@@ -496,6 +501,18 @@ sub get_servers {
     return $datas;
 }
 
+sub get_server_diagnostics {
+    my ($self, %options) = @_;
+
+    my $datas = $self->request(
+        project_id => $options{project_id},
+        endpoint_type => 'compute',
+        endpoint => '/servers/' . $options{server_id} . '/diagnostics'
+    );
+
+    return $datas;
+}
+
 sub get_projects {
     my ($self, %options) = @_;
 
@@ -575,7 +592,7 @@ sub get_ports {
         endpoint => '/v2.0/ports',
         data_attr => 'ports',
         paging_attr => 'ports_links',
-        read_attrs => ['id', 'name', 'network_id', 'tenant_id', 'admin_state_up', 'status', 'device_id', 'device_owner']
+        read_attrs => ['id', 'name', 'network_id', 'tenant_id', 'admin_state_up', 'status', 'device_id', 'device_owner', 'mac_address']
     );
 
     return $datas;
