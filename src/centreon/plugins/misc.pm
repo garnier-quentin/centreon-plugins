@@ -24,6 +24,21 @@ use strict;
 use warnings;
 use utf8;
 use JSON::XS;
+use Safe;
+use Encode;
+
+use Exporter 'import';
+use feature 'state';
+
+our @EXPORT_OK = qw/change_seconds
+                    flatten_arrays
+                    flatten_to_hash
+                    graphql_escape
+                    is_empty
+                    json_encode
+                    json_decode
+                    slurp_file
+                    value_of/;
 
 sub execute {
     my (%options) = @_;
@@ -340,6 +355,27 @@ sub is_empty {
     return 0;
 }
 
+# Return the value of a complex perl variable (hash, array...) or a default value if it not defined.
+# The returned value will never be undef.
+# I.g:  value_of($hash, '->{key}->{subkey}', 'default')
+#       value_of($array, '->[0]', 'default')
+#       value_of($complex, '->{key}->[0]->{subkey}', 'default')
+sub value_of($$;$) {
+    my ($variable, $expression, $default) = @_;
+    $default //= '';
+
+    return $default unless defined $variable;
+
+    state $safe = do { my $s = Safe->new();
+                       $s->share('$v');
+                       $s;
+                     };
+    our $v = $variable;
+    my $value = $safe->reval("\$v$expression", 1);
+
+    return defined $value ? $value : $default;
+}
+
 sub trim {
     my ($value) = $_[0];
     
@@ -364,6 +400,34 @@ sub powershell_escape {
     $value =~ s/'/`'/g;
     $value =~ s/"/`"/g;
     return $value;
+}
+
+sub graphql_escape($) {
+    my ($value) = $_[0];
+    $value =~ s/"/\\"/g;
+    return $value;
+}
+
+# Returns an array from arrays containing values separated by $separator
+sub flatten_arrays($;$) {
+    my ($array_of_values, $separator) = @_;
+    $separator //= ',';
+
+    return [ ] unless ref $array_of_values eq 'ARRAY';
+
+    return [ map { split $separator } @{$array_of_values} ];
+}
+
+# Returns an hash from arrays containing values separated by $separator
+# Values are set to $default (1 if not defined)
+sub flatten_to_hash($;$;$) {
+    my ($array_of_values, $separator, $default) = @_;
+    $separator //= ',';
+    $default //= 1;
+
+    return { } unless ref $array_of_values eq 'ARRAY';
+
+    return { map { $_ => $default } map { split $separator } @{$array_of_values} };
 }
 
 sub minimal_version {
@@ -770,9 +834,11 @@ sub json_decode {
     my ($content, %options) = @_;
 
     $content =~ s/\r//mg;
-    my $object;
 
-    my $decoder = JSON::XS->new->utf8;
+    $content = decode('UTF-8', $content, Encode::FB_DEFAULT);
+
+    my $decoder = JSON::XS->new;
+
     # this option
     if ($options{booleans_as_strings}) {
         # boolean_values() is not available on old versions of JSON::XS (Alma 8 still provides v3.04)
@@ -784,13 +850,26 @@ sub json_decode {
         }
     }
 
-    eval {
-        $object = $decoder->decode($content);
-    };
+    my $object = eval { $decoder->decode($content) };
+
     if ($@) {
-        print STDERR "Cannot decode JSON string: $@" . "\n";
+        # To keep compatibilty with old json_decode:
+        # If 'output' not set, print error on STDERR unless 'silence' is set
+        # Otherwise print error on 'output' and exit unless 'no_exit' is set
+        my $msg = $options{errstr} // "Cannot decode JSON string: $@";
+
+        if ($options{output}) {
+            $options{output}->option_exit(short_msg => $msg)
+                unless $options{no_exit};
+
+            $options{output}->output_add(long_msg => $msg, debug => 1);
+        } else {
+            warn "$msg\n" unless $options{silence};
+        }
+
         return undef;
     }
+
     return $object;
 }
 
@@ -996,6 +1075,22 @@ Checks if a value is empty.
 
 =back
 
+=head2 value_of
+
+    my $value = centreon::plugins::misc::value_of($variable, $expression, $default);
+
+Return the value of a complex perl variable (hash, array...) or a default value if it not defined.
+
+=over 4
+
+=item * C<$value> - The return value.
+
+=item * C<$expression> - The expression to test.
+
+=item * C<$default> - The default value to return if expression is not defined (optional).
+
+=back
+
 =head2 trim
 
     my $trimmed_value = centreon::plugins::misc::trim($value);
@@ -1029,6 +1124,48 @@ Escapes special characters in a string for use in PowerShell.
 =over 4
 
 =item * C<$value> - The string to escape.
+
+=back
+
+=head2 graphql_escape
+
+    my $escaped = centreon::plugins::misc::graphql_escape($value);
+
+Escapes special characters in a string for use in GraphQL query.
+
+=over 4
+
+=item * C<$value> - The string to escape.
+
+=back
+
+=head2 flatten_arrays
+
+    my $array = centreon::plugins::misc::flatten_arrays($arrays, $separator);
+
+Returns an array from arrays containing values separated by a separator ( default comma ).
+
+=over 4
+
+=item * C<$arrays> - Arrays to expand.
+
+=item * C<$separator> - Separator ( comma if undef ).
+
+=back
+
+=head2 flatten_to_hash
+
+    my $hash = centreon::plugins::misc::flatten_to_hash($arrays, $separator, $default);
+
+Returns a hash from arrays containing values separated by a separator ( default comma ). Values are set to optional parameter $default ( 1 if undef ).
+
+=over 4
+
+=item * C<$arrays> - Arrays to expand.
+
+=item * C<$separator> - Separator ( comma if undef ).
+
+=item * C<$default> - Default value ( 1 if undef ).
 
 =back
 
@@ -1346,6 +1483,14 @@ Decodes a JSON string.
 
 =item * C<booleans_as_strings> - Defines whether booleans must be converted to C<true>/C<false> strings instead of
 JSON:::PP::Boolean values. C<1> => strings, C<0> => booleans.
+
+=item * C<errstr> - Custom error message to display if JSON string cannot be decoded.
+
+=item * C<output> - Output object to use for displaying errors.
+
+=item * C<no_exit> - Do not exit if there is an error and C<output> is defined.
+
+=item * C<silence> - Do not print error on STDERR if C<output> is not defined.
 
 =back
 
