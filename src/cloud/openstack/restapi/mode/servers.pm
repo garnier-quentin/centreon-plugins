@@ -51,6 +51,7 @@ sub custom_cpu_calc {
         ($options{new_datas}->{$self->{instance} . '_deltaTime'} -
          $options{old_datas}->{$self->{instance} . '_deltaTime'});
     $self->{result_values}->{cpuId} = $options{new_datas}->{$self->{instance} . '_cpuId'};
+    $self->{result_values}->{domainName} = $options{new_datas}->{$self->{instance} . '_domainName'};
     $self->{result_values}->{serverName} = $options{new_datas}->{$self->{instance} . '_serverName'};
     $self->{result_values}->{projectName} = $options{new_datas}->{$self->{instance} . '_projectName'};
 
@@ -309,21 +310,21 @@ sub set_counters {
             type => 2,
             critical_default => '%{networkStatus} =~ /down|error/i or %{portStatus} =~ /down|error/i',
             set => {
-                key_values => [ { name => 'portStatus' }, { name => 'networkStatus' }, { name => 'serverName' }, { name => 'projectName' } ],
+                key_values => [ { name => 'portStatus' }, { name => 'networkStatus' }, { name => 'domainName' }, { name => 'serverName' }, { name => 'projectName' } ],
                 closure_custom_output => $self->can('custom_port_output'),
                 closure_custom_perfdata => sub { return 0; },
                 closure_custom_threshold_check => \&catalog_status_threshold_ng
             }
         },
         { label => 'traffic-in', set => {
-                key_values => [ { name => 'trafficIn', per_second => 1 }, { name => 'macAddress' }, { name => 'serverName' }, { name => 'projectName' } ],
+                key_values => [ { name => 'trafficIn', per_second => 1 }, { name => 'macAddress' }, { name => 'domainName' }, { name => 'serverName' }, { name => 'projectName' } ],
                 output_template => 'traffic in: %s %s/s',
                 output_change_bytes => 2,
                 closure_custom_perfdata => $self->can('custom_traffic_perfdata')
             }
         },
         { label => 'traffic-out', set => {
-                key_values => [ { name => 'trafficOut', per_second => 1 }, { name => 'macAddress' }, { name => 'serverName' }, { name => 'projectName' } ],
+                key_values => [ { name => 'trafficOut', per_second => 1 }, { name => 'macAddress' }, { name => 'domainName' }, { name => 'serverName' }, { name => 'projectName' } ],
                 output_template => 'traffic out: %s %s/s',
                 output_change_bytes => 2,
                 closure_custom_perfdata => $self->can('custom_traffic_perfdata')
@@ -333,19 +334,19 @@ sub set_counters {
 
     $self->{maps_counters}->{memory} = [
         { label => 'memory-usage', nlabel => 'server.memory.usage.bytes', set => {
-                key_values => [ { name => 'used' }, { name => 'free' }, { name => 'prct_used' }, { name => 'prct_free' }, { name => 'total' }, { name => 'serverName' }, , { name => 'projectName' } ],
+                key_values => [ { name => 'used' }, { name => 'free' }, { name => 'prct_used' }, { name => 'prct_free' }, { name => 'total' }, { name => 'domainName' }, { name => 'serverName' }, { name => 'projectName' } ],
                 closure_custom_output => $self->can('custom_memory_output'),
                 closure_custom_perfdata => $self->can('custom_memory_detailed_perfdata')
             }
         },
         { label => 'memory-usage-free', nlabel => 'server.memory.free.bytes', display_ok => 0, set => {
-                key_values => [ { name => 'free' }, { name => 'used' }, { name => 'prct_used' }, { name => 'prct_free' }, { name => 'total' }, { name => 'serverName' }, , { name => 'projectName' } ],
+                key_values => [ { name => 'free' }, { name => 'used' }, { name => 'prct_used' }, { name => 'prct_free' }, { name => 'total' }, { name => 'domainName' }, { name => 'serverName' }, { name => 'projectName' } ],
                 closure_custom_output => $self->can('custom_memory_output'),
                 closure_custom_perfdata => $self->can('custom_memory_detailed_perfdata')
             }
         },
         { label => 'memory-usage-prct', nlabel => 'server.memory.usage.percentage', display_ok => 0, set => {
-                key_values => [ { name => 'prct_used' }, { name => 'used' }, { name => 'free' }, { name => 'prct_free' }, { name => 'total' }, { name => 'serverName' }, , { name => 'projectName' } ],
+                key_values => [ { name => 'prct_used' }, { name => 'used' }, { name => 'free' }, { name => 'prct_free' }, { name => 'total' }, { name => 'domainName' }, { name => 'serverName' }, { name => 'projectName' } ],
                 closure_custom_output => $self->can('custom_memory_output'),
                 closure_custom_perfdata => $self->can('custom_percent_perfdata')
             }
@@ -354,7 +355,7 @@ sub set_counters {
 
      $self->{maps_counters}->{cpu} = [
         { label => 'cpu-utilization', nlabel => 'server.core.cpu.utilization.percentage', set => {
-                key_values => [ { name => 'cpuTime', diff => 1 }, { name => 'deltaTime', diff => 1 }, { name => 'cpuId' }, { name => 'serverName' }, { name => 'projectName' } ],
+                key_values => [ { name => 'cpuTime', diff => 1 }, { name => 'deltaTime', diff => 1 }, { name => 'cpuId' }, { name => 'domainName' }, { name => 'serverName' }, { name => 'projectName' } ],
                 closure_custom_calc => $self->can('custom_cpu_calc'),
                 output_template => 'usage: %.2f %%',
                 threshold_use => 'cpuUtil',
@@ -391,7 +392,7 @@ sub check_options {
     $self->{custom_perfdata_instances} = $self->custom_perfdata_instances(
         option_name => '--custom-perfdata-instances',
         instances => $self->{option_results}->{custom_perfdata_instances},
-        labels => { projectName => 1, serverName => 1 }
+        labels => { domainName => 1, projectName => 1, serverName => 1 }
     );
 }
 
@@ -403,6 +404,7 @@ sub add_stats {
         my $used = $stat->{memory_details}->{used} * 1024 * 1024;
         my $total = $stat->{memory_details}->{maximum} * 1024 * 1024;
         $self->{servers}->{ $options{project}->{id} . $options{server}->{id} }->{memory} = {
+            domainName => $options{domain_name},
             serverName => $options{server}->{name},
             projectName => $options{project}->{name},
             used => $used,
@@ -417,6 +419,7 @@ sub add_stats {
         $self->{servers}->{ $options{project}->{id} . $options{server}->{id} }->{cpu} = {};
         foreach my $cpu (@{$stat->{cpu_details}}) {
             $self->{servers}->{ $options{project}->{id} . $options{server}->{id} }->{cpu}->{ $cpu->{id} } = {
+                domainName => $options{domain_name},
                 serverName => $options{server}->{name},
                 projectName => $options{project}->{name},
                 cpuId => $cpu->{id},
@@ -454,6 +457,7 @@ sub manage_selection {
     $self->{servers} = {};
 
     my $projects = $options{custom}->get_projects();
+    my $domain_name = $options{custom}->get_current_domain_name();
     foreach my $project (@$projects) {
         next if (defined($self->{option_results}->{filter_project_name}) && $self->{option_results}->{filter_project_name} ne '' &&
             $project->{name} !~ /$self->{option_results}->{filter_project_name}/);
@@ -493,6 +497,7 @@ sub manage_selection {
                 my $network = $self->get_network(networks => $networks, network_id => $port->{network_id});
 
                 $self->{servers}->{ $project->{id} . $server->{id} }->{ports}->{ $port->{id} } = {
+                    domainName => $domain_name,
                     serverName => $server->{name},
                     projectName => $project->{name},
                     macAddress => $port->{mac_address},
@@ -504,7 +509,7 @@ sub manage_selection {
             }
 
             if (defined($self->{option_results}->{add_stats})) {
-                $self->add_stats(custom => $options{custom}, project => $project, server => $server);
+                $self->add_stats(custom => $options{custom}, project => $project, server => $server, domain_name => $domain_name);
             }
 
             $self->{projects}->{ $project->{id} }->{ $map_power_state->{ $server->{'OS-EXT-STS:power_state'} } }++;

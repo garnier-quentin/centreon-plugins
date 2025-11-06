@@ -87,7 +87,7 @@ sub check_options {
     $self->{critical_http_status} = (defined($self->{option_results}->{critical_http_status})) ? $self->{option_results}->{critical_http_status} : '';
     $self->{api_username} = $self->{option_results}->{api_username};
     $self->{api_password} = $self->{option_results}->{api_password};
-    $self->{api_domain} = (defined($self->{option_results}->{api_domain})) ? $self->{option_results}->{api_domain} : 'default';
+    $self->{api_domain} = (defined($self->{option_results}->{api_domain}) && $self->{option_results}->{api_domain} ne '') ? $self->{option_results}->{api_domain} : 'default';
     $self->{cache_lifetime} = $self->{option_results}->{cache_lifetime} =~ /(\d+)/ ? $1 : 1800;
 
     if ($self->{option_results}->{identity_endpoint} eq '') {
@@ -113,7 +113,7 @@ sub check_options {
 sub get_connection_info {
     my ($self, %options) = @_;
 
-    return $self->{option_results}->{identity_endpoint} . ':' . $self->{option_results}->{api_username};
+    return $self->{option_results}->{identity_endpoint} . ':' . $self->{api_domain} . ':' . $self->{option_results}->{api_username};
 }
 
 sub settings {
@@ -134,6 +134,12 @@ sub clean_token {
     my $datas = { updated => time() };
     $self->{cache_connect_unscoped}->write(data => $datas);
     $self->{cache_connect_scoped}->write(data => $datas);
+}
+
+sub get_current_domain_name {
+    my ($self, %options) = @_;
+
+    return $self->{'cache_connect_unscoped'}->get(name => 'domain_name');
 }
 
 sub get_endpoint {
@@ -250,20 +256,24 @@ sub get_token {
             $self->{output}->option_exit();
         }
 
+        my $domain_name = '';
         my $endpoints = {
             compute => '',
             loadbalancer => '',
             network => ''
         };
-        if (!defined($options{project_id}) && defined($decoded->{token}->{catalog})) {
-            foreach my $catalog (@{$decoded->{token}->{catalog}}) {
-                $catalog->{type} =~ s/-//g;
+        if (!defined($options{project_id})) {
+            $domain_name = $decoded->{token}->{project}->{domain}->{name};
+            if (defined($decoded->{token}->{catalog})) {
+                foreach my $catalog (@{$decoded->{token}->{catalog}}) {
+                    $catalog->{type} =~ s/-//g;
 
-                next if (!defined($endpoints->{ $catalog->{type} }));
+                    next if (!defined($endpoints->{ $catalog->{type} }));
 
-                foreach (@{$catalog->{endpoints}}) {
-                    if ($_->{interface} eq 'public') {
-                        $endpoints->{ $catalog->{type} } = $_->{url};
+                    foreach (@{$catalog->{endpoints}}) {
+                        if ($_->{interface} eq 'public') {
+                            $endpoints->{ $catalog->{type} } = $_->{url};
+                        }
                     }
                 }
             }
@@ -276,7 +286,8 @@ sub get_token {
             updated => time(),
             token => $token,
             md5_secret => $md5_secret,
-            endpoints => $endpoints
+            endpoints => $endpoints,
+            domain_name => $domain_name
         };
         $self->{'cache_connect_' . $token_type}->write(data => $datas);
     }

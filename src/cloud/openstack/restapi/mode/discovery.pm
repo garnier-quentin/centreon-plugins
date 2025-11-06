@@ -55,8 +55,10 @@ sub check_options {
 sub discovery_server {
     my ($self, %options) = @_;
 
-    my $disco_data = [];
     my $projects = $options{custom}->get_projects();
+    my $domain_name = $options{custom}->get_current_domain_name();
+
+    my $disco_data = [];
     foreach (@$projects) {
         my $servers = $options{custom}->get_servers(project_id => $_->{id});
 
@@ -69,6 +71,7 @@ sub discovery_server {
             $node->{power_state} = $server->{'OS-EXT-STS:power_state'};
             $node->{availability_zone} = $server->{'OS-EXT-AZ:availability_zone'};
             $node->{project_name} = $_->{name};
+            $node->{domain_name} = $domain_name;
 
             push @$disco_data, $node;
         }
@@ -80,8 +83,10 @@ sub discovery_server {
 sub discovery_loadbalancer {
     my ($self, %options) = @_;
 
-    my $disco_data = [];
     my $projects = $options{custom}->get_projects();
+    my $domain_name = $options{custom}->get_current_domain_name();
+
+    my $disco_data = [];
     foreach (@$projects) {
         my $lbs = $options{custom}->get_loadbalancers(project_id => $_->{id});
 
@@ -92,6 +97,7 @@ sub discovery_loadbalancer {
             $node->{operating_status} = lc($lb->{operating_status});
             $node->{provisioningStatus} => lc($lb->{provisioning_status});
             $node->{project_name} = $_->{name};
+            $node->{domain_name} = $domain_name;
 
             push @$disco_data, $node;
         }

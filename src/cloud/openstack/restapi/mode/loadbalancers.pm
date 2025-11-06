@@ -179,13 +179,13 @@ sub set_counters {
 
     $self->{maps_counters}->{connection} = [
         { label => 'connections-active', nlabel => 'loadbalancer.connections.active.count', set => {
-                key_values => [ { name => 'active' }, { name => 'lbName' }, { name => 'projectName' } ],
+                key_values => [ { name => 'active' }, { name => 'domainName' }, { name => 'lbName' }, { name => 'projectName' } ],
                 output_template => 'active: %s',
                 closure_custom_perfdata => $self->can('custom_counter_perfdata')
             }
         },
         { label => 'connections-total', nlabel => 'loadbalancer.connections.total.count', set => {
-                key_values => [ { name => 'total', diff => 1 }, { name => 'lbName' }, { name => 'projectName' } ],
+                key_values => [ { name => 'total', diff => 1 }, { name => 'domainName' }, { name => 'lbName' }, { name => 'projectName' } ],
                 output_template => 'total: %s',
                 closure_custom_perfdata => $self->can('custom_counter_perfdata')
             }
@@ -194,7 +194,7 @@ sub set_counters {
 
     $self->{maps_counters}->{error} = [
         { label => 'requests-error', nlabel => 'loadbalancer.requests.error.count', set => {
-                key_values => [ { name => 'total', diff => 1 }, { name => 'lbName' }, { name => 'projectName' } ],
+                key_values => [ { name => 'total', diff => 1 }, { name => 'domainName' }, { name => 'lbName' }, { name => 'projectName' } ],
                 output_template => 'number of requests in error: %s',
                 closure_custom_perfdata => $self->can('custom_counter_perfdata')
             }
@@ -203,14 +203,14 @@ sub set_counters {
 
     $self->{maps_counters}->{traffic} = [
         { label => 'traffic-in', nlabel => 'loadbalancer.traffic.in.bitspersecond', set => {
-                key_values => [ { name => 'in', per_second => 1 }, { name => 'lbName' }, { name => 'projectName' } ],
+                key_values => [ { name => 'in', per_second => 1 }, { name => 'domainName' }, { name => 'lbName' }, { name => 'projectName' } ],
                 output_template => 'traffic in: %s %s/s',
                 output_change_bytes => 2,
                 closure_custom_perfdata => $self->can('custom_traffic_perfdata')
             }
         },
         { label => 'traffic-out', nlabel => 'loadbalancer.traffic.out.bitspersecond', set => {
-                key_values => [ { name => 'out', per_second => 1 }, { name => 'lbName' }, { name => 'projectName' } ],
+                key_values => [ { name => 'out', per_second => 1 }, { name => 'domainName' }, { name => 'lbName' }, { name => 'projectName' } ],
                 output_template => 'traffic out: %s %s/s',
                 output_change_bytes => 2,
                 closure_custom_perfdata => $self->can('custom_traffic_perfdata')
@@ -244,7 +244,7 @@ sub check_options {
     $self->{custom_perfdata_instances} = $self->custom_perfdata_instances(
         option_name => '--custom-perfdata-instances',
         instances => $self->{option_results}->{custom_perfdata_instances},
-        labels => { projectName => 1, lbName => 1 }
+        labels => { domainName => 1, projectName => 1, lbName => 1 }
     );
 }
 
@@ -256,6 +256,7 @@ sub manage_selection {
     $self->{lbs} = {};
 
     my $projects = $options{custom}->get_projects();
+    my $domain_name = $options{custom}->get_current_domain_name();
     foreach my $project (@$projects) {
         next if (defined($self->{option_results}->{filter_project_name}) && $self->{option_results}->{filter_project_name} ne '' &&
             $project->{name} !~ /$self->{option_results}->{filter_project_name}/);
@@ -285,14 +286,17 @@ sub manage_selection {
                     provisioningStatus => lc($lb->{provisioning_status})
                 },
                 connection => {
+                    domainName => $domain_name,
                     lbName => $lb->{name},
                     projectName => $project->{name},
                 },
                 error => {
+                    domainName => $domain_name,
                     lbName => $lb->{name},
                     projectName => $project->{name},
                 },
                 traffic => {
+                    domainName => $domain_name,
                     lbName => $lb->{name},
                     projectName => $project->{name},
                 }
