@@ -55,7 +55,9 @@ sub new {
             'warning-http-status:s'  => { name => 'warning_http_status' },
             'critical-http-status:s' => { name => 'critical_http_status' },
             'cache-use'              => { name => 'cache_use' },
-            'cache-lifetime:s'       => { name => 'cache_lifetime', default => '' }
+            'cache-lifetime:s'       => { name => 'cache_lifetime', default => '' },
+            'authent-by-env'         => { name => 'authent_by_env' },
+            'authent-by-file:s'      => { name => 'authent_by_file', default => '' }
         });
     }
     $options{options}->add_help(package => __PACKAGE__, sections => 'REST API OPTIONS', once => 1);
@@ -90,6 +92,13 @@ sub check_options {
     $self->{api_domain} = (defined($self->{option_results}->{api_domain}) && $self->{option_results}->{api_domain} ne '') ? $self->{option_results}->{api_domain} : 'default';
     $self->{cache_lifetime} = $self->{option_results}->{cache_lifetime} =~ /(\d+)/ ? $1 : 1800;
 
+    if (defined($self->{option_results}->{authent_by_env})) {
+        $self->apply_env_config();
+    }
+    if (defined($self->{option_results}->{authent_by_file}) && $self->{option_results}->{authent_by_file} ne '') {
+        $self->apply_file_config();
+    }
+
     if ($self->{option_results}->{identity_endpoint} eq '') {
         $self->{output}->add_option_msg(short_msg => "Need to specify --identity-endpoint option.");
         $self->{output}->option_exit();
@@ -108,6 +117,37 @@ sub check_options {
     $self->{cache}->check_options(option_results => $self->{option_results});
 
     return 0;
+}
+
+my %_external_conf_equiv = (
+    OS_USERNAME => 'api_username',
+    OS_PASSWORD => 'api_password',
+    OS_PROJECT_DOMAIN_NAME => 'api_domain',
+    OS_AUTH_URL => 'identity_endpoint'
+);
+
+sub apply_env_config {
+    my ($self, %options) = @_;
+
+    # https://docs.openstack.org/python-openstackclient/latest/cli/authentication.html
+    foreach (keys %_external_conf_equiv) {
+        $self->{ $_external_conf_equiv{$_} } = $ENV{$_}
+            if (exists($ENV{$_}));
+    }
+}
+
+sub apply_file_config {
+    my ($self, %options) = @_;
+
+    open(my $file, "<".$options{apply_conf_from_file})
+        or $self->{output}->option_exit(short_msg => "Cannot open file '".$options{apply_conf_from_file}."': $!");
+    foreach my $line (<$file>) {
+        next unless ($line =~ /^[\s\t]*export[\t\s]+(\w+)=["']?(.*?)["']?$/);
+
+        $self->{$_external_conf_equiv{$1}} = $2
+            if (exists($_external_conf_equiv{$1}));
+    }
+    close($file);
 }
 
 sub get_connection_info {
@@ -662,6 +702,17 @@ Use the cache file (created with cache mode).
 =item B<--cache-lifetime>
 
 Define the cache lifetime before raising an error (default: 1800 seconds). 
+
+=item B<--authent-by-env>
+
+Use OpenStack environment variables if they are defined.
+Used environment variables are OS_USERNAME, OS_PASSWORD, OS_PROJECT_DOMAIN_NAME, OS_AUTH_URL.
+
+=item B<--authent-by-file>
+
+Read OpenStack environment variables from a file.
+Handled environment variables are OS_USERNAME, OS_PASSWORD, OS_PROJECT_DOMAIN_NAME, OS_AUTH_URL.
+Those variables must be defined using 'export VARIABLE="value"' syntax.
 
 =back
 

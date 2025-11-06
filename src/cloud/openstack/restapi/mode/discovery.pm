@@ -95,7 +95,7 @@ sub discovery_loadbalancer {
             $node->{uuid} = $lb->{id};
             $node->{name} = $lb->{name};
             $node->{operating_status} = lc($lb->{operating_status});
-            $node->{provisioningStatus} => lc($lb->{provisioning_status});
+            $node->{provisioningStatus} = lc($lb->{provisioning_status});
             $node->{project_name} = $_->{name};
             $node->{domain_name} = $domain_name;
 
