@@ -46,10 +46,10 @@ my %map_sensor_type = (
     14 => 'dBm'
 );
 my %map_scale = (
-    1 => -24, # yocto, 
+    1 => -24, # yocto,
     2 => -21, # zepto
     3 => -18, # atto
-    4 => -15, # femto 
+    4 => -15, # femto
     5 => -12, # pico
     6 => -9, # nano
     7 => -6, # micro
@@ -115,7 +115,7 @@ my $oid_entSensorThresholdEntry = '.1.3.6.1.4.1.9.9.91.1.2.1.1';
 sub load {
     my ($self) = @_;
 
-    push @{$self->{request}}, { oid => $oid_entSensorValueEntry, end => $mapping->{entSensorStatus}->{oid} }, 
+    push @{$self->{request}}, { oid => $oid_entSensorValueEntry, end => $mapping->{entSensorStatus}->{oid} },
         { oid => $oid_entSensorThresholdEntry, end => $mapping2->{entSensorThresholdValue}->{oid} };
 }
 
@@ -187,34 +187,61 @@ sub get_default_critical_threshold {
     return $th;
 }
 
-sub identify_ports_shutdown {
-    my ($self) = @_;
+sub is_port_shutdown {
+    my ($self, %options) = @_;
 
     # the port is shutdown if:
     #    receive power sensor is -40dBm
     #    transmit power sensor is -40dBm
     #    bias current sensor is 0A
+    # or:
+    #    receive power sensor is 0dBm
+    #    transmit power sensor is 0dBm
+    #    bias current sensor is 0A
+    return 0 if ($options{sensor_descr} !~ /^(.+)\s+(Receive Power Sensor|Transmit Power Sensor|Bias Current Sensor)/i);
+    my $name = $1;
+    return 0
+        if (!defined($self->{ports_shutdown}->{$name}) ||
+            !defined($self->{ports_shutdown}->{$name}->{rx}) ||
+            !defined($self->{ports_shutdown}->{$name}->{tx}) ||
+            !defined($self->{ports_shutdown}->{$name}->{bias})
+        );
+    return 1 if ($self->{ports_shutdown}->{$name}->{rx} == -40 &&
+            $self->{ports_shutdown}->{$name}->{tx} == -40 &&
+            $self->{ports_shutdown}->{$name}->{bias} == 0
+        );
+    return 1 if ($self->{ports_shutdown}->{$name}->{rx} == 0 &&
+            $self->{ports_shutdown}->{$name}->{tx} == 0 &&
+            $self->{ports_shutdown}->{$name}->{bias} == 0
+        );
+    return 0;
+}
+
+sub identify_ports_shutdown {
+    my ($self) = @_;
+
     $self->{ports_shutdown} = {};
     foreach my $oid ($self->{snmp}->oid_lex_sort(keys %{$self->{results}->{$oid_entSensorValueEntry}})) {
         next if ($oid !~ /^$mapping->{entSensorStatus}->{oid}\.(.*)$/);
-    
+
         my $instance = $1;
         my $result = $self->{snmp}->map_instance(mapping => $mapping, results => $self->{results}->{$oid_entSensorValueEntry}, instance => $instance);
 
-        $result->{entSensorValue} = defined($result->{entSensorValue}) ? 
+        $result->{entSensorValue} = defined($result->{entSensorValue}) ?
            $result->{entSensorValue} * (10 ** ($result->{entSensorScale}) * (10 ** -($result->{entSensorPrecision}))) : undef;
-    
+
         next if (!defined($self->{results}->{ $self->{physical_name} }->{ $self->{physical_name} . '.' . $instance }));
         my $sensor_descr = $self->{results}->{ $self->{physical_name} }->{ $self->{physical_name} . '.' . $instance };
 
         next if ($sensor_descr !~ /^(.+)\s+(Receive Power Sensor|Transmit Power Sensor|Bias Current Sensor)/i);
         my ($name, $type) = ($1, $2);
 
-        $self->{ports_shutdown}->{$name} = 0 if (!defined($self->{ports_shutdown}->{$name}));
-        $self->{ports_shutdown}->{$name}++
-            if ($type =~ /Receive|Transmit/i && defined($result->{entSensorValue}) && $result->{entSensorValue} == -40);
-        $self->{ports_shutdown}->{$name}++
-            if ($type =~ /Bias/i && defined($result->{entSensorValue}) && $result->{entSensorValue} == 0);
+        $self->{ports_shutdown}->{$name} = {} if (!defined($self->{ports_shutdown}->{$name}));
+        if (defined($result->{entSensorValue}) && $result->{entSensorValue} =~ /[0-9]/) {
+            $self->{ports_shutdown}->{$name}->{rx} = $result->{entSensorValue} if ($type =~ /Receive/i);
+            $self->{ports_shutdown}->{$name}->{tx} = $result->{entSensorValue} if ($type =~ /Transmit/i);
+            $self->{ports_shutdown}->{$name}->{bias} = $result->{entSensorValue} if ($type =~ /Bias/i);
+        }
     }
 }
 
@@ -239,15 +266,15 @@ sub check {
         next if ($self->check_filter(section => 'sensor', instance => $result->{entSensorType} . '.' . $instance, name => $sensor_descr));
         $self->{components}->{sensor}->{total}++;
 
-        $result->{entSensorValue} = defined($result->{entSensorValue}) ? 
+        $result->{entSensorValue} = defined($result->{entSensorValue}) ?
            $result->{entSensorValue} * (10 ** ($result->{entSensorScale}) * (10 ** -($result->{entSensorPrecision}))) : undef;
 
-        if ($sensor_descr =~ /^(.+)\s+(Receive Power Sensor|Transmit Power Sensor|Bias Current Sensor)/i && $self->{ports_shutdown}->{$1} == 3) {
+        if (is_port_shutdown($self, sensor_descr => $sensor_descr)) {
             $self->{output}->output_add(
                 long_msg => sprintf(
-                    "sensor '%s' status is '%s' [instance: %s] [value: %s %s] [port is shutdown]", 
+                    "sensor '%s' status is '%s' [instance: %s] [value: %s %s] [port is shutdown]",
                     $sensor_descr, $result->{entSensorStatus},
-                    $instance, 
+                    $instance,
                     defined($result->{entSensorValue}) ? $result->{entSensorValue} : '-',
                     $result->{entSensorType}
                 )
@@ -257,9 +284,9 @@ sub check {
 
         $self->{output}->output_add(
             long_msg => sprintf(
-                "sensor '%s' status is '%s' [instance: %s] [value: %s %s]", 
+                "sensor '%s' status is '%s' [instance: %s] [value: %s %s]",
                 $sensor_descr, $result->{entSensorStatus},
-                $instance, 
+                $instance,
                 defined($result->{entSensorValue}) ? $result->{entSensorValue} : '-',
                 $result->{entSensorType}
             )
@@ -269,7 +296,7 @@ sub check {
             $self->{output}->output_add(
                 severity => $exit,
                 short_msg => sprintf(
-                    "Sensor '%s/%s' status is '%s'", 
+                    "Sensor '%s/%s' status is '%s'",
                     $sensor_descr, $instance, $result->{entSensorStatus}
                 )
             );
@@ -292,9 +319,9 @@ sub check {
             $warn = $self->{perfdata}->get_perfdata_for_output(label => 'warning-' . $component . '-instance-' . $instance);
             $crit = $self->{perfdata}->get_perfdata_for_output(label => 'critical-' . $component  . '-instance-' . $instance);
             $exit2 = $self->{perfdata}->threshold_check(
-                value => $result->{entSensorValue}, 
+                value => $result->{entSensorValue},
                 threshold => [
-                    { label => 'critical-' . $component  . '-instance-' . $instance, exit_litteral => 'critical' }, 
+                    { label => 'critical-' . $component  . '-instance-' . $instance, exit_litteral => 'critical' },
                     { label => 'warning-' . $component . '-instance-' . $instance, exit_litteral => 'warning' }
                 ]
             );
@@ -317,7 +344,7 @@ sub check {
 
         $self->{output}->perfdata_add(
             label => $component, unit => $perfdata_unit{$result->{entSensorType}},
-            nlabel => 'hardware.' . $component, 
+            nlabel => 'hardware.' . $component,
             instances => $sensor_descr,
             value => $result->{entSensorValue},
             warning => $warn,
@@ -350,7 +377,7 @@ sub check {
         $self->{output}->perfdata_add(
             label => 'sensor.' . $verify_th_update->{$_}->{result}->{entSensorType},
             unit => $perfdata_unit{ $verify_th_update->{$_}->{result}->{entSensorType} },
-            nlabel => 'hardware.sensor.' . $verify_th_update->{$_}->{result}->{entSensorType}, 
+            nlabel => 'hardware.sensor.' . $verify_th_update->{$_}->{result}->{entSensorType},
             instances => $verify_th_update->{$_}->{sensor_descr},
             value => $verify_th_update->{$_}->{result}->{entSensorValue},
             warning => $warn,
