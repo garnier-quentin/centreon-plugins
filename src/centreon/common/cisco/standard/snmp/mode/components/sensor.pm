@@ -187,12 +187,45 @@ sub get_default_critical_threshold {
     return $th;
 }
 
+sub identify_ports_shutdown {
+    my ($self) = @_;
+
+    # the port is shutdown if:
+    #    receive power sensor is -40dBm
+    #    transmit power sensor is -40dBm
+    #    bias current sensor is 0A
+    $self->{ports_shutdown} = {};
+    foreach my $oid ($self->{snmp}->oid_lex_sort(keys %{$self->{results}->{$oid_entSensorValueEntry}})) {
+        next if ($oid !~ /^$mapping->{entSensorStatus}->{oid}\.(.*)$/);
+    
+        my $instance = $1;
+        my $result = $self->{snmp}->map_instance(mapping => $mapping, results => $self->{results}->{$oid_entSensorValueEntry}, instance => $instance);
+
+        $result->{entSensorValue} = defined($result->{entSensorValue}) ? 
+           $result->{entSensorValue} * (10 ** ($result->{entSensorScale}) * (10 ** -($result->{entSensorPrecision}))) : undef;
+    
+        next if (!defined($self->{results}->{ $self->{physical_name} }->{ $self->{physical_name} . '.' . $instance }));
+        my $sensor_descr = $self->{results}->{ $self->{physical_name} }->{ $self->{physical_name} . '.' . $instance };
+
+        next if ($sensor_descr !~ /^(.+)\s+(Receive Power Sensor|Transmit Power Sensor|Bias Current Sensor)/i);
+        my ($name, $type) = ($1, $2);
+
+        $self->{ports_shutdown}->{$name} = 0 if (!defined($self->{ports_shutdown}->{$name}));
+        $self->{ports_shutdown}->{$name}++
+            if ($type =~ /Receive|Transmit/i && defined($result->{entSensorValue}) && $result->{entSensorValue} == -40);
+        $self->{ports_shutdown}->{$name}++
+            if ($type =~ /Bias/i && defined($result->{entSensorValue}) && $result->{entSensorValue} == 0);
+    }
+}
+
 sub check {
     my ($self) = @_;
 
     $self->{output}->output_add(long_msg => "Checking sensors");
     $self->{components}->{sensor} = {name => 'sensors', total => 0, skip => 0};
     return if ($self->check_filter(section => 'sensor'));
+
+    identify_ports_shutdown($self);
 
     my $verify_th_update = {};
     foreach my $oid ($self->{snmp}->oid_lex_sort(keys %{$self->{results}->{$oid_entSensorValueEntry}})) {
@@ -208,6 +241,19 @@ sub check {
 
         $result->{entSensorValue} = defined($result->{entSensorValue}) ? 
            $result->{entSensorValue} * (10 ** ($result->{entSensorScale}) * (10 ** -($result->{entSensorPrecision}))) : undef;
+
+        if ($sensor_descr =~ /^(.+)\s+(Receive Power Sensor|Transmit Power Sensor|Bias Current Sensor)/i && $self->{ports_shutdown}->{$1} == 3) {
+            $self->{output}->output_add(
+                long_msg => sprintf(
+                    "sensor '%s' status is '%s' [instance: %s] [value: %s %s] [port is shutdown]", 
+                    $sensor_descr, $result->{entSensorStatus},
+                    $instance, 
+                    defined($result->{entSensorValue}) ? $result->{entSensorValue} : '-',
+                    $result->{entSensorType}
+                )
+            );
+            next;
+        }
 
         $self->{output}->output_add(
             long_msg => sprintf(
