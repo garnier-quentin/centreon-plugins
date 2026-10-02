@@ -18,7 +18,7 @@
 # limitations under the License.
 #
 
-package network::brocade::snmp::mode::listinterfaces;
+package network::nokia::wavelite::snmp::mode::listinterfaces;
 
 use base qw(snmp_standard::mode::listinterfaces);
 
@@ -28,8 +28,10 @@ use warnings;
 sub set_oids_label {
     my ($self, %options) = @_;
 
-    $self->SUPER::set_oids_label(%options);
-    $self->{oids_label}->{fcportname} =  '.1.3.6.1.4.1.1588.2.1.1.1.6.2.1.36';
+    $self->{oids_label} //= {
+        'ifalias' => '.1.3.6.1.2.1.31.1.1.1.18',
+        'ifname' => '.1.3.6.1.2.1.31.1.1.1.1'
+    };
 }
 
 sub new {
@@ -39,87 +41,53 @@ sub new {
     return $self;
 }
 
-sub manage_selection {
+sub get_additional_information {
     my ($self, %options) = @_;
 
-    my $oids = [{ oid => $self->{oids_label}->{$self->{option_results}->{oid_filter}} }];
-    if ($self->{option_results}->{oid_filter} ne $self->{option_results}->{oid_display}) {
-        push @$oids, { oid => $self->{oids_label}->{$self->{option_results}->{oid_display}} };
+    my $result = $self->SUPER::get_additional_information(%options);
+
+    my $ifDesc = {};
+    my $oid_ifdesc = '.1.3.6.1.2.1.2.2.1.2';
+    my $snmp_result = $self->{snmp}->get_table(oid => $oid_ifdesc);
+    foreach (keys %$snmp_result) {
+        next if (! /^$oid_ifdesc\.(.*)$/);
+        $ifDesc->{$1} = $snmp_result->{$_};
     }
-    if (scalar(keys %{$self->{extra_oids}}) > 0) {
-        foreach (keys %{$self->{extra_oids}}) {
-            push @$oids, { oid => $self->{extra_oids}->{$_}->{oid} };
+
+    my @indexes = keys %$ifDesc;
+    my $instances = [];
+    my $mapping = {};
+    foreach my $ifIndex (@indexes) {
+        next if ($ifDesc->{$ifIndex} !~ /^SFP\s+Interface\s+(\d+)/i);
+        my $num = $1;
+        foreach (@indexes) {
+            #next if ($ifType->{$_} != 6); seems buggy because we have 195 on some Line Interface
+
+            if ($ifDesc->{$_} =~ /^Line\s+Interface\s+$num/i) {
+                $mapping->{$_} = $ifIndex;
+                push @$instances, $_;
+                last;
+            }
         }
     }
 
-    # ifName mandatory with fcPortName
-    if (($self->{option_results}->{oid_filter} eq 'fcportname' || $self->{option_results}->{oid_display} eq 'fcportname') && 
-        ($self->{option_results}->{oid_filter} ne 'ifname' && $self->{option_results}->{oid_display} ne 'ifname')) {
-        push @$oids, { oid => $self->{oids_label}->{ifname} };
+    $snmp_result = undef;
+    if (scalar(@$instances) > 0) {
+        $self->{snmp}->load(oids => [$self->{oid_adminstatus}, $self->{oid_opstatus}], instances => $instances);
+        $snmp_result = $self->{snmp}->get_leef();        
     }
 
-    $self->{datas} = {};
-    $self->{results} = $self->{snmp}->get_multiple_table(oids => $oids);
-    $self->{datas}->{all_ids} = [];
-
-    my $oid_filter = $self->{option_results}->{oid_filter} eq 'fcportname' ? 'ifname' : $self->{option_results}->{oid_filter};
-    foreach ($self->{snmp}->oid_lex_sort(keys %{$self->{results}->{ $self->{oids_label}->{$oid_filter} }})) {
-        next if (! /^$self->{oids_label}->{$oid_filter}\.(.*)$/);
-
-        my $ifIndex = $1;
-        if ($self->{option_results}->{oid_filter} eq 'fcportname' && $self->{results}->{ $self->{oids_label}->{ifname} }->{$_} =~ /\d+\/(\d+)$/) {
-            $self->{datas}->{ $self->{option_results}->{oid_filter} . '_' . $ifIndex } = $self->{output}->decode($self->{results}->{ $self->{oids_label}->{fcportname} }->{ $self->{oids_label}->{fcportname} . '.' . ($1 + 1) });
-        } else {
-            $self->{datas}->{ $self->{option_results}->{oid_filter} . '_' . $ifIndex } = $self->{output}->decode($self->{results}->{ $self->{oids_label}->{$oid_filter} }->{$_});
-        }
-
-        push @{$self->{datas}->{all_ids}}, $ifIndex;
-    }
-
-    if (scalar(@{$self->{datas}->{all_ids}}) <= 0) {
-        $self->{output}->add_option_msg(short_msg => "Can't get interfaces...");
-        $self->{output}->option_exit();
-    }
-
-    if ($self->{option_results}->{oid_filter} ne $self->{option_results}->{oid_display}) {
-        my $oid_display = $self->{option_results}->{oid_display} eq 'fcportname' ? 'ifname' : $self->{option_results}->{oid_display};
-        foreach ($self->{snmp}->oid_lex_sort(keys %{$self->{results}->{ $self->{oids_label}->{$oid_display} }})) {
-            next if (! /^$self->{oids_label}->{$oid_display}\.(.*)$/);
-
+    if (defined($snmp_result)) {
+        foreach my $oid (keys %$snmp_result) {
+            next if ($oid !~ /^$self->{oid_adminstatus}\.(.*)/i);
             my $ifIndex = $1;
-            if ($self->{option_results}->{oid_display} eq 'fcportname' && $self->{results}->{ $self->{oids_label}->{ifname} }->{$_} =~ /\d+\/(\d+)$/) {
-                $self->{datas}->{ $self->{option_results}->{oid_display} . '_' . $ifIndex } = $self->{output}->decode($self->{results}->{ $self->{oids_label}->{fcportname} }->{ $self->{oids_label}->{fcportname} . '.' . ($1 + 1) });
-            } else {
-                $self->{datas}->{ $self->{option_results}->{oid_display} . '_' . $ifIndex } = $self->{output}->decode($self->{results}->{ $self->{oids_label}->{$oid_display} }->{$_});
-            }
+
+            $result->{ $self->{oid_adminstatus} . '.' . $mapping->{$ifIndex} } = $snmp_result->{$oid};
+            $result->{ $self->{oid_opstatus} . '.' . $mapping->{$ifIndex} } = $snmp_result->{ $self->{oid_opstatus} . '.' . $ifIndex };
         }
     }
 
-    if (!defined($self->{option_results}->{use_name}) && defined($self->{option_results}->{interface})) {
-        foreach (@{$self->{datas}->{all_ids}}) {
-            if ($self->{option_results}->{interface} =~ /(^|\s|,)$_(\s*,|$)/) {
-                push @{$self->{interface_id_selected}}, $_;
-            }
-        }
-    } else {
-        foreach (@{$self->{datas}->{all_ids}}) {
-            my $filter_name = $self->{datas}->{$self->{option_results}->{oid_filter} . "_" . $_};
-            next if (!defined($filter_name));
-
-            if (!defined($self->{option_results}->{interface})) {
-                push @{$self->{interface_id_selected}}, $_;
-                next;
-            }
-            if ($filter_name =~ /$self->{option_results}->{interface}/) {
-                push @{$self->{interface_id_selected}}, $_; 
-            }
-        }
-    }
-
-    if (scalar(@{$self->{interface_id_selected}}) <= 0 && !defined($options{disco})) {
-        $self->{output}->add_option_msg(short_msg => 'No entry found');
-        $self->{output}->option_exit();
-    }
+    return $result;
 }
 
 1;
@@ -156,11 +124,11 @@ Display interfaces with AdminStatus 'up'.
 
 =item B<--oid-filter>
 
-Define the OID to be used to filter interfaces (default: ifName) (values: fcPortName, ifDesc, ifAlias, ifName).
+Define the OID to be used to filter interfaces (default: ifName) (values: ifAlias, ifName).
 
 =item B<--oid-display>
 
-Define the OID that will be used to name the interfaces (default: ifName) (values: fcPortName, ifDesc, ifAlias, ifName).
+Define the OID that will be used to name the interfaces (default: ifName) (values: ifAlias, ifName).
 
 =item B<--display-transform-src> B<--display-transform-dst>
 
