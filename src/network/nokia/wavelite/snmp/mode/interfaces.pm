@@ -60,7 +60,7 @@ sub set_counters_errors {
     push @{$self->{maps_counters}->{int}},
         { label => 'laser-temp', filter => 'add_optical', nlabel => 'interface.laser.temperature.celsius', set => {
                 key_values => [ { name => 'laser_temp' }, { name => 'display' } ],
-                output_template => 'Laser temperature: %.2f C', output_error_template => 'Laser temperature: %.2f',
+                output_template => 'Laser Temperature : %.2f C', output_error_template => 'Laser Temperature : %.2f',
                 perfdatas => [
                     { template => '%.2f', unit => 'C', label_extra_instance => 1, instance_use => 'display' }
                 ]
@@ -68,7 +68,7 @@ sub set_counters_errors {
         },
         { label => 'input-power', filter => 'add_optical', nlabel => 'interface.input.power.dbm', set => {
                 key_values => [ { name => 'input_power' }, { name => 'display' } ],
-                output_template => 'Input power: %s dBm', output_error_template => 'Input power: %s',
+                output_template => 'Input Power : %s dBm', output_error_template => 'Input Power : %s',
                 perfdatas => [
                     { template => '%s', unit => 'dBm', label_extra_instance => 1, instance_use => 'display' }
                 ]
@@ -76,7 +76,7 @@ sub set_counters_errors {
         },
         { label => 'output-power', filter => 'add_optical', nlabel => 'interface.output.power.dbm', set => {
                 key_values => [ { name => 'output_power' }, { name => 'display' } ],
-                output_template => 'Output power: %s dBm', output_error_template => 'Output power: %s',
+                output_template => 'Output Power : %s dBm', output_error_template => 'Output Power : %s',
                 perfdatas => [
                     { template => '%s', unit => 'dBm', label_extra_instance => 1, instance_use => 'display' }
                 ]
@@ -272,15 +272,19 @@ sub add_result_traffic {
 sub add_result_errors {
     my ($self, %options) = @_;
 
+    $self->{int}->{$options{instance}}->{mode_cast} = 32;
+
     return if ($self->{snmp}->is_snmpv1());
+
+    $self->{int}->{$options{instance}}->{mode_cast} = 64;
  
     my $opticalIndexes = $self->{statefile_cache}->get(name => 'mapOpticalIndex');
     return if (!defined($opticalIndexes->{ $options{instance} }));
  
     $self->{int}->{$options{instance}}->{total_in_packets} = $self->{results}->{ $oid_counter_nokia . '.' . $opticalIndexes->{ $options{instance} } . '.1.2.0' };
     $self->{int}->{$options{instance}}->{total_out_packets} = $self->{results}->{ $oid_counter_nokia . '.' . $opticalIndexes->{ $options{instance} } . '.2.2.0' };
-    $self->{int}->{$options{instance}}->{incrc} = $self->{results}->{ $oid_counter_nokia . '.' . $options{instance} . '.5.2.0' };
-    $self->{int}->{$options{instance}}->{outcrc} = $self->{results}->{ $oid_counter_nokia . '.' . $options{instance} . '.6.2.0' };
+    $self->{int}->{$options{instance}}->{incrc} = $self->{results}->{ $oid_counter_nokia . '.' . $opticalIndexes->{ $options{instance} } . '.5.2.0' };
+    $self->{int}->{$options{instance}}->{outcrc} = $self->{results}->{ $oid_counter_nokia . '.' . $opticalIndexes->{ $options{instance} } . '.6.2.0' };
 }
 
 sub add_result_status {
