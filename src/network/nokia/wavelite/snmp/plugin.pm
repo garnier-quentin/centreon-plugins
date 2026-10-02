@@ -30,10 +30,11 @@ sub new {
     bless $self, $class;
 
     $self->{modes} = {
-        'hardware'         => 'network::nokia::wavelite::snmp::mode::hardware',
-        'interfaces'       => 'network::nokia::wavelite::snmp::mode::interfaces',
-        'list-interfaces'  => 'network::nokia::wavelite::snmp::mode::listinterfaces',
-        'uptime'           => 'network::nokia::wavelite::snmp::mode::uptime'
+        'hardware'        => 'network::nokia::wavelite::snmp::mode::hardware',
+        'interfaces'      => 'network::nokia::wavelite::snmp::mode::interfaces',
+        'list-interfaces' => 'network::nokia::wavelite::snmp::mode::listinterfaces',
+        'temperature'     => 'network::nokia::wavelite::snmp::mode::temperature',
+        'uptime'          => 'network::nokia::wavelite::snmp::mode::uptime'
     };
 
     return $self;
