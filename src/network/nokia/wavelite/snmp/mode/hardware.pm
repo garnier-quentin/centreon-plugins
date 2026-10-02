@@ -27,8 +27,6 @@ use network::nokia::wavelite::snmp::mode::components::resources qw(%oids);
 sub set_system {
     my ($self, %options) = @_;
 
-    $self->{regexp_threshold_numeric_check_section_option} = '^(temperature)$';
-
     $self->{cb_hook2} = 'snmp_execute';
 
     $self->{thresholds} = {
@@ -95,7 +93,7 @@ Some not exists ;)
 =item B<--filter>
 
 Exclude the items given as a comma-separated list (example: --filter=fan).
-You can also exclude items from specific instances: --filter=fan,1.2
+You can also exclude items from specific instances: --filter=fan,1
 
 =item B<--no-component>
 
@@ -105,7 +103,7 @@ Define the expected status if no components are found (default: critical).
 =item B<--threshold-overload>
 
 Use this option to override the status returned by the plugin when the status label matches a regular expression (syntax: section,[instance,]status,regexp).
-Example: --threshold-overload='psu.oper,CRITICAL,standby'
+Example: --threshold-overload='psu,OK,minorAlarm'
 
 =back
 
