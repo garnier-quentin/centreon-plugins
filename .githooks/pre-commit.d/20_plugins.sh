@@ -1,31 +1,14 @@
 #!/bin/bash
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Directory of this script, without forking to dirname
+script_dir="${BASH_SOURCE[0]%/*}"
+if [[ "${script_dir}" == "${BASH_SOURCE[0]}" ]]; then
+  script_dir='.'
+fi
+# shellcheck source=../lib/common.sh
+source "${script_dir}/../lib/common.sh"
 
-# global errors counter
-errors=0
 tmpfile="/tmp/check$$"
-
-function info() {
-    echo -e "${GREEN}INFO${NC}: $*"
-}
-
-function warning() {
-    echo -e "${YELLOW}WARNING${NC}: $*"
-}
-
-function error() {
-    echo -e "${RED}ERROR${NC}: $*"
-    : $((errors++))
-}
-
-function fatal() {
-    echo -e "${RED}FATAL${NC}: $*"
-    exit 1
-}
 
 function check_tabs_crlf() {
     local file="$1"
@@ -39,11 +22,12 @@ function check_constants() {
     local file="$1"
 
     info "--> Checking constants utilization"
+    [[ "$file" =~ src/centreon/plugins/.*\.pm ]] && return 0
 
     grep -nH -- "-\(1\|2\|10\)[[:space:]]*=>[[:space:]]*1" "$file" > "$tmpfile"
     grep -nH "\<type[[:space:]]*=>[[:space:]]*[0-9]" "$file" >> "$tmpfile"
     if [ -s "$tmpfile" ] ; then
-        error "It seems that some counters are not using constants defined in centreon/plugins/constants.pm. You may also need to add `use centreon::plugins::constants qw(:counters);` in your file."
+        error "It seems that some counters are not using constants defined in centreon/plugins/constants.pm. You may also need to add 'use centreon::plugins::constants qw(:counters);' in your file."
         cat $tmpfile
     fi
 }
@@ -58,9 +42,61 @@ function check_md5() {
     fi
 }
 
+function check_json_schema() {
+    local file="$1"
+    local declared
+
+    # JSON Schema documents are recognised by their .schema.json suffix
+    [[ "$file" == *.schema.json ]] || return 0
+
+    info "--> Checking the declared JSON Schema draft"
+    declared=$($jq -r '."$schema" // ""' "$file" 2>/dev/null)
+    if [[ -z "$declared" ]] ; then
+        # without the key, --check-metaschema silently falls back to the latest
+        # draft and reports success, so the conformance check below proves nothing
+        error "$file has no \"\$schema\" key, expected $json_schema_draft"
+    elif [[ "$declared" != "$json_schema_draft" ]] ; then
+        error "$file declares $declared instead of $json_schema_draft"
+    fi
+
+    if [[ -z "$check_jsonschema_path" ]] ; then
+        warning "Could not locate check-jsonschema. Skipping JSON Schema conformance check for $file"
+        return 0
+    fi
+
+    info "--> Checking JSON Schema conformance"
+    if ! $check_jsonschema_path --check-metaschema "$file" > "$tmpfile" 2>&1 ; then
+        error "$file does not conform to $json_schema_draft"
+        cat "$tmpfile"
+    fi
+}
+
+function check_rs_collection() {
+    local file="$1"
+
+    # a Rust SNMP collection is recognised by where it lives
+    [[ "$file" == "$rs_collections_dir"/*/*.json ]] || return 0
+
+    # the very script the CI runs, so a commit cannot pass a check the pipeline fails
+    info "--> Checking the collection against the format version it declares"
+    if ! $rs_collections_validator "$file" > "$tmpfile" 2>&1 ; then
+        error "$file is not a valid collection"
+        cat "$tmpfile"
+    fi
+}
+
 jq=$(type -p jq) || fatal "Could not locate jq command"
 # Determining the robotidy command
 robocop_path=$(type -p robocop)
+# Determining the yamllint command
+yamllint_path=$(type -p yamllint)
+# Determining the check-jsonschema command
+check_jsonschema_path=$(type -p check-jsonschema)
+# JSON Schema draft this repository standardises on
+json_schema_draft="https://json-schema.org/draft/2020-12/schema"
+# Rust SNMP collections, and the script validating them, shared with the CI
+rs_collections_dir="rust-plugins/rs-collections"
+rs_collections_validator=".github/scripts/validate-rs-collections.sh"
 
 # Get list of committed files
 mapfile -t committed_files < <(git diff --cached --name-only --diff-filter=ACMR)
@@ -72,7 +108,7 @@ for file in "${committed_files[@]}"; do
         pm|pl)
             # check that the perl file compiles
             info "--> Checking that file compiles"
-            perl -I ./src -I ./tests/connectors/vmware -I ./connectors/vmware/src -c "$file" >/dev/null 2>&1 || error "File $file does not compile with perl -c"
+            perl -I ./src -I ./tests/connectors/vmware -I ./connectors/vmware/src -c "$file" >/dev/null 2>&1 || error "File $file does not compile with perl -c $file"
             # check the copyright year
             info "--> Checking that file copyright is OK"
             grep "Copyright 20..-Present Centreon" "$file" >/dev/null || error "Copyright in $file does not contain \"Copyright $(date +%Y)-Present Centreon\""
@@ -81,10 +117,12 @@ for file in "${committed_files[@]}"; do
             grep -- '--warning-\*\|--critical-\*' "$file"  >/dev/null && error "File $file contains help that is written as --warning-* or --critical-*"
             # check spelling
             info "--> Checking that spelling in file is OK"
-            perl .github/scripts/pod_spell_check.t "$file" ./tests/resources/spellcheck/stopwords.txt >$tmpfile 2>&1
+            cmd_spell_check='perl .github/scripts/pod_spell_check.t '"$file"' ./tests/resources/spellcheck/stopwords.txt >$tmpfile 2>&1'
+            eval "$cmd_spell_check"
             rc=$?
             if [ $rc -ne 0 ] ; then
                 error "Spellcheck error on file $file"
+                info "command:  $cmd_spell_check"
                 tail -n 2 $tmpfile | head -n 1 | sed 's/^[^:]*:/Invalid words:/' 2>/dev/null
             fi
             check_tabs_crlf "$file"
@@ -119,6 +157,16 @@ for file in "${committed_files[@]}"; do
             info "--> Checking JSON validity"
             jq '.' "$file" >/dev/null 2>&1 || error "JSON file $file is not valid"
             check_tabs_crlf "$file"
+            check_json_schema "$file"
+            check_rs_collection "$file"
+          ;;
+        yml|yaml)
+            if [[ -z "$yamllint_path" ]] ; then
+                warning "Could not locate yamllint. Skipping YAML lint check for $file"
+                continue
+            fi
+            info "--> Checking YAML validity"
+            $yamllint_path -c ./resources/githooks/yamllint_rules.yml "$file" || error "$file does not comply with yamllint"
           ;;
         *)
             info "File extension '.${file_extension}' has no checks"

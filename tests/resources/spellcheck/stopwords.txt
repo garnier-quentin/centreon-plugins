@@ -71,6 +71,7 @@ CXF
 Cyberoam
 DaemonSet
 Datacore
+datafiles
 datasource
 datastore
 Datastore
@@ -87,6 +88,7 @@ dfsrevent
 --display-transform-dst
 --display-transform-src
 dns-resolve-time
+DSM
 --dyn-mode
 Ekara
 -EncodedCommand
@@ -205,8 +207,10 @@ memBuffer
 memTotalReal
 Meraki
 MIB
+microcores
 Microkernel
 Mikrotik
+millicores
 milliwatt
 milliwatts
 MMC
@@ -237,6 +241,8 @@ nagios
 Nagios
 NagVis
 --nagvis-perfdata
+nanocores
+Netasq
 Netconf
 Netscaler
 net-snmp
@@ -266,6 +272,7 @@ okta
 OLT
 oneaccess-sys-mib
 OneAPI
+OneView
 Opengear
 OpenMetrics
 OpenShift
@@ -305,6 +312,7 @@ QoS
 Qtree
 queue-messages-inflighted
 quts
+qwinsta
 raidvolume
 redis-cli
 ReplicaJobSession
@@ -360,6 +368,7 @@ teampass
 Teldat
 temperatureambient
 timeframe
+timespan
 TiMOS
 TLS
 TLSv1
@@ -389,10 +398,12 @@ v1
 v2
 v2c
 v3
+Vates
 vCenter
 VCENTER
 vCPU
 vCPUs
+vCSA
 VCSA
 vdom
 vdomain
@@ -431,6 +442,8 @@ WildFire
 WLAN
 WLC
 WSMAN
+XCP-ng
+Xen
 XPath
 ZDX
 ZFS
