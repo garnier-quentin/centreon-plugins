@@ -440,12 +440,38 @@ sub manage_selection {
 sub disco_format {
     my ($self, %options) = @_;
 
-    $self->{output}->add_disco_format(elements => ['siteName', 'clusterName', 'gatewayName', 'interfaceName', 'adminState', 'operationalState']);
+    $self->{output}->add_disco_format(elements => ['siteName', 'clusterName', 'gatewayName', 'interfaceName', 'interfaceType', 'IPAddress', 'IPNetmask', 'mac', 'adminState', 'operationalState']);
+}
+
+sub get_interface_address {
+    my ($self, %options) = @_;
+
+    my ($name, $tag) = split(/\./, $options{interface});
+    $tag = 1 if (!defined($tag));
+
+    if ($options{type} =~ /^(wan|ha)$/) {
+    foreach my $item (@{$options{network}}) {
+            if ($item->{interface_name} eq $name && $item->{name} =~ /-$options{gw_name}/) {
+                return { IPAddress => $item->{default_gateway}, IPNetmask => $item->{subnet} };
+            }
+        }
+ 
+        return { IPAddress => '', IPNetmask => '' };
+    }
+
+    foreach my $item (@{$options{network}}) {
+        if ($item->{interface_name} =~ /^$name(,|$)/ && $item->{tag} == $tag) {
+            return { IPAddress => $item->{default_gateway}, IPNetmask => $item->{subnet} };
+        }
+    }
+
+    return { IPAddress => '', IPNetmask => '' };
 }
 
 sub disco_show {
     my ($self, %options) = @_;
 
+    my $networks = {};
     my $gateways = $options{custom}->get_gateways();
     foreach my $gw (@$gateways) {
         next if is_excluded($gw->{site_name}, $self->{option_results}->{include_site_name}, $self->{option_results}->{exclude_site_name});
@@ -453,9 +479,15 @@ sub disco_show {
         next if is_excluded($gw->{gw_name}, $self->{option_results}->{include_gateway_name}, $self->{option_results}->{exclude_gateway_name});
         next if is_excluded($gw->{gw_id}, $self->{option_results}->{include_gateway_id}, $self->{option_results}->{exclude_gateway_id});
 
+        if (!defined($networks->{ $gw->{cluster_id} })) {
+            $networks->{ $gw->{cluster_id} } = $options{custom}->get_network(cluster_id => $gw->{cluster_id});
+        }
+
         my $interfaces = $options{custom}->get_gateway_interfaces(gateway_id => $gw->{gw_id});
         foreach my $int (@$interfaces) {
             next if is_excluded($int->{name}, $self->{option_results}->{include_interface_name}, $self->{option_results}->{exclude_interface_name});
+
+            my $address = $self->get_interface_address(network => $networks->{ $gw->{cluster_id} }, interface => $int->{name}, gw_name => $gw->{gw_name}, type => $int->{interface_type});
 
             $self->{output}->add_disco_entry(
                 gatewayName      => $gw->{gw_name},
@@ -463,7 +495,10 @@ sub disco_show {
                 siteName         => $gw->{site_name},
                 interfaceName    => $int->{name},
                 adminState       => $int->{admin_state},
-                operationalState => $int->{operational_state}
+                operationalState => $int->{operational_state},
+                interfaceType    => $int->{interface_type},
+                mac              => $int->{mac},
+                %$address
             );
         }
     }

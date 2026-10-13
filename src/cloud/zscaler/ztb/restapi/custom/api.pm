@@ -397,7 +397,9 @@ sub get_gateway_interfaces {
                     description => $int->{description},
                     admin_state => $int->{admin_state},
                     operational_state => $int->{operational_state},
-                    if_stats => $int->{if_stats}
+                    if_stats => $int->{if_stats},
+                    mac => $int->{mac},
+                    interface_type => $int->{interface_type}
                 };
             }
         }
@@ -426,6 +428,17 @@ sub get_appconnector_config {
     );
 
     return $data->{result};
+}
+
+sub get_network {
+    my ($self, %options) = @_;
+
+    my $data = $self->request_api(
+        endpoint => '/v2/Network/',
+        get_param => ['cluster_id=' . $options{cluster_id}],
+    );
+
+    return $data->{result}->{rows};
 }
 
 1;
