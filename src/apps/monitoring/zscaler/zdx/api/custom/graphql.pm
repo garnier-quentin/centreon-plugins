@@ -161,43 +161,107 @@ sub request_devices {
 
     $self->get_token();
 
-    my $query = {
-        query => '
-        query ListDevices($from: DateTime!, $to: DateTime!, $first: Int!, $after: String) {
-            ZDX {
-                devices(first: $first, after: $after, time_range: {from: $from, to: $to}) {
-                    total_count
-                    page_info { has_next_page end_cursor }
-                    edges { node { id { value } name { value } profile { os_name zdx_version } } }
+    my @items = ();
+    my $after = '';
+
+    while (1) {
+        my $query = {
+            query => '
+            query ListDevices($from: DateTime!, $to: DateTime!, $first: Int!, $after: String) {
+                ZDX {
+                    devices(first: $first, after: $after, time_range: {from: $from, to: $to}) {
+                        total_count
+                        page_info { has_next_page end_cursor }
+                        edges {
+                            node {
+                                id { value }
+                                user_info {
+                                    user_id { value }
+                                    loc_id { value }
+                                    loc_name { value }
+                                    last_seen_ts
+                                }
+                                app_metrics {
+                                    app_id { value }
+                                    app_name { value }
+                                    zdx_score
+                                }
+                                web_app_metrics {
+                                    app_id { value }
+                                    app_name { value }
+                                    user_id { value }
+                                    pft {
+                                        min
+                                        avg
+                                    }
+                                    synthetic_probe_score
+                                }
+                            } 
+                        }
+                    }
                 }
+            }',
+            variables => {
+                from => '2026-11-02T12:00:00Z',
+                to   => '2026-11-02T14:00:00Z',
+                first => 1000,
+                after => $after
             }
-        }',
-        variables => {
-            from => '2026-02-11T00:00:00Z',
-            to   => '2026-02-11T01:00:00Z',
-            first => 1000,
-            after => undef
+        };
+
+        my ($content) = $self->{http}->request(
+            method     => 'POST',
+            header => [
+                'Content-Type: application/json'
+            ],
+            accept_encoding => 'gzip',
+            url_path   => $self->{option_results}->{api_path},
+            query_form_post => json_encode($query, output => $self->{output})
+        );
+
+        $self->{output}->option_exit(short_msg => "API returns empty content [code: '" . $self->{http}->get_code() . "'] [message: '" . $self->{http}->get_message() . "']")
+            if is_empty($content);
+
+        my $decoded = json_decode($content, output => $self->{output}, no_exit => 1);
+        $self->{output}->option_exit(short_msg => MSG_JSON_DECODE_ERROR)
+            unless $decoded;
+
+        foreach my $node (@{$decoded->{data}->{ZDX}->{devices}->{edges}}) {
+            my $item = {
+                id => $node->{node}->{id}->{value},
+                app_metrics => [],
+                web_app_metrics => [],
+                user_info => []
+            };
+            foreach (@{$node->{node}->{app_metrics}}) {
+                push @{$item->{app_metrics}}, { app_name => $_->{app_name}->{value}, app_id => $_->{app_id}->{value}, zdx_score => $_->{zdx_score} };
+            }
+            foreach (@{$node->{node}->{user_info}}) {
+                push @{$item->{user_info}}, { user_id => $_->{user_id}->{value}, loc_id => $_->{loc_id}->{value}, loc_name => $_->{loc_name}->{value}, last_seen_ts => $_->{last_seen_ts} };
+            }
+            foreach (@{$node->{node}->{web_app_metrics}}) {
+                push @{$item->{web_app_metrics}}, {
+                    user_id => $_->{user_id}->{value},
+                    app_name => $_->{app_name}->{value},
+                    app_id => $_->{app_id}->{value},
+                    pft => $_->{pft},
+                    synthetic_probe_score => $_->{synthetic_probe_score}
+                };
+            }
+            
+            push @items, $item;
         }
-    };
 
-    my ($content) = $self->{http}->request(
-        method     => 'POST',
-        header => [
-            'Content-Type: application/json'
-        ],
-        accept_encoding => 'gzip',
-        url_path   => $self->{option_results}->{api_path},
-        query_form_post => json_encode($query, output => $self->{output})
-    );
+        last if (!defined($decoded->{data}->{ZDX}->{devices}->{page_info}->{end_cursor}) || $decoded->{data}->{ZDX}->{devices}->{page_info}->{end_cursor} eq '');
+        $after = $decoded->{data}->{ZDX}->{devices}->{page_info}->{end_cursor};
+ 
+        my $remaining = $self->{http}->get_header(name => 'x-ratelimit-remaining');
+        if ($remaining == 0) {
+            sleep($self->{http}->get_header(name => 'x-ratelimit-reset'));
+        }
+    }
 
-    $self->{output}->option_exit(short_msg => "API returns empty content [code: '" . $self->{http}->get_code() . "'] [message: '" . $self->{http}->get_message() . "']")
-        if is_empty($content);
-
-    my $decoded = json_decode($content, output => $self->{output}, no_exit => 1);
-    $self->{output}->option_exit(short_msg => MSG_JSON_DECODE_ERROR)
-        unless $decoded;
-
-    return $decoded;
+    return \@items;
 }
 
 sub write_cache_file {
