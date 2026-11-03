@@ -35,7 +35,6 @@ my @_options = qw/
     max_metrics_age
 /;
 
-
 sub new {
     my ($class, %options) = @_;
 
@@ -119,24 +118,14 @@ sub manage_selection {
     my $apps = $options{custom}->get_apps( map {$_ => $self->{$_}} @_options);
 
     foreach my $app (@$apps) {
-        $self->{application}->{$app->{name}} = {
+        $self->{application}->{ $app->{name} } = {
             name        => $app->{name},
             score       => $app->{score},
-            total_users => $app->{total_users}
+            total_users => $app->{total_users},
+            pft         => $app->{pft}
         };
-        my $metrics = $options{custom}->get_unique_app_metrics(
-            %options,
-            application_id => $app->{id},
-            max_metrics_age => $self->{max_metrics_age}
-        );
-        foreach my $metric_name (keys %$metrics) {
-            if ($metrics->{$metric_name} == -1) {
-                $self->{output}->add_option_msg(long_msg => 'metric "' . $metric_name .'" is skipped for app "' . $app->{name} . '" because its value is -1');
-                next;
-            }
-            $self->{application}->{$app->{name}}->{$metric_name} = $metrics->{$metric_name};
-        }
     }
+
     return 1;
 }
 

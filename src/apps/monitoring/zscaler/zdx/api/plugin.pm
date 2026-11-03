@@ -29,13 +29,15 @@ sub new {
     my $self = $class->SUPER::new(package => __PACKAGE__, %options);
     bless $self, $class;
 
-    $self->{version} = '0.1';
     $self->{modes} = {
+        'cache'          => 'apps::monitoring::zscaler::zdx::api::mode::cache',
         'application'    => 'apps::monitoring::zscaler::zdx::api::mode::application',
         'discovery'      => 'apps::monitoring::zscaler::zdx::api::mode::discovery',
-        'list-locations' => 'apps::monitoring::zscaler::zdx::api::mode::listlocations',
+        'list-locations' => 'apps::monitoring::zscaler::zdx::api::mode::listlocations'
     };
+
     $self->{custom_modes}->{api} = 'apps::monitoring::zscaler::zdx::api::custom::api';
+    $self->{custom_modes}->{graphql} = 'apps::monitoring::zscaler::zdx::api::custom::graphql';
     return $self;
 }
 

@@ -24,8 +24,6 @@ use strict;
 use warnings;
 use centreon::plugins::http;
 use centreon::plugins::statefile;
-use DateTime;
-use URI::Escape;
 use Digest::SHA qw(sha256_hex);
 use centreon::plugins::misc qw(json_decode is_empty value_of is_excluded);
 
@@ -91,9 +89,11 @@ sub get_token {
     my $content = $self->{http}->request(
         method          => 'POST',
         full_url        => $self->{auth_url},
-        header          => [ 'Content-Type: application/x-www-form-urlencoded' ],
-        query_form_post => "grant_type=client_credentials&client_id=" . uri_escape($self->{client_id})
-            . "&client_secret=" . uri_escape($self->{client_secret}),
+        post_params     => {
+            'client_id'     => $self->{client_id}, 
+            'client_secret' => $self->{client_secret}, 
+            'grant_type'    => 'client_credentials'
+        }
     );
     my $decoded_content = json_decode($content, output => $self->{output});
 
@@ -195,6 +195,13 @@ sub get_unique_app_metrics {
     return $data;
 }
 
+sub cache_devices {
+    my ($self, %options) = @_;
+
+    $self->{output}->add_option_msg(short_msg => 'Unsupported cache mode. Please use --custommode=graphql option');
+    $self->{output}->option_exit();
+}
+
 sub get_apps {
     my ($self, %options) = @_;
 
@@ -202,11 +209,13 @@ sub get_apps {
 
     # build the params to filter on the locations
     $self->{get_params} = $self->build_location_filters(%options);
-    my @stats;
+
     # either we have a single app to get by its id
     if (!is_empty($options{application_id})) {
-        push @stats, $self->get_unique_app(application_id => $options{application_id});
-        return \@stats;
+        my $item = $self->get_unique_app(application_id => $options{application_id});
+        my $metrics = $self->get_unique_app_metrics(application_id => $options{application_id}, max_metrics_age => $options{max_metrics_age});
+        $item = { %$item, %$metrics };
+        return [$item];
     }
 
     # or we have to get all apps and check which ones match the filters
@@ -217,17 +226,20 @@ sub get_apps {
     );
     my $all_apps = json_decode($all_apps_json, output => $self->{output});
 
+    my @stats;
     foreach my $app (@$all_apps) {
         next if is_excluded(
             $app->{name},
             $options{include_application_name},
             $options{exclude_application_name});
+        my $metrics = $self->get_unique_app_metrics(application_id => $app->{id}, max_metrics_age => $options{max_metrics_age});
 
         push @stats, {
             id          => $app->{id},
             name        => $app->{name},
             score       => $app->{score},
-            total_users => $app->{total_users}
+            total_users => $app->{total_users},
+            %$metrics
         };
     }
     push @stats, {
