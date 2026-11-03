@@ -183,9 +183,9 @@ sub request_devices {
     my ($content) = $self->{http}->request(
         method     => 'POST',
         header => [
-            'Content-Type: application/json',
-            'Accept-Encoding: gzip'
+            'Content-Type: application/json'
         ],
+        accept_encoding => 'gzip',
         url_path   => $self->{option_results}->{api_path},
         query_form_post => json_encode($query, output => $self->{output})
     );

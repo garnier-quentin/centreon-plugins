@@ -180,6 +180,11 @@ sub request {
         });
     }
 
+    if (defined($request_options->{accept_encoding})) {
+        $self->{output}->add_option_msg(short_msg => 'unsupported accept_encoding param');
+        $self->{output}->option_exit();
+    }
+
     if (defined($request_options->{no_follow})) {
         $self->{ua}->requests_redirectable(undef);
     } else {

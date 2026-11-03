@@ -426,6 +426,11 @@ sub request {
         $self->{curl_log}->log('--cookie', $options{request}->{cookies_file});
         $self->{curl_log}->log('--cookie-jar', $options{request}->{cookies_file});
     }
+ 
+    if (defined($options{request}->{accept_encoding})) {
+        $self->curl_setopt(option => $self->{constant_cb}->(name => 'CURLOPT_ACCEPT_ENCODING'), parameter => $options{request}->{accept_encoding});
+        $self->{curl_log}->log('--compressed');
+    }
 
     $self->curl_setopt(option => $self->{constant_cb}->(name => 'CURLOPT_FOLLOWLOCATION'), parameter => 1);
     if (defined($options{request}->{no_follow})) {
