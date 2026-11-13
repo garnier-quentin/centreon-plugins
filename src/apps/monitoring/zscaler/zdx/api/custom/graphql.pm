@@ -27,6 +27,7 @@ use centreon::plugins::statefile;
 use centreon::plugins::misc qw(json_encode json_decode is_empty value_of is_excluded);
 use centreon::plugins::constants qw(:messages);
 use Digest::SHA qw(sha256_hex);
+use DateTime;
 
 sub new {
     my ($class, %options) = @_;
@@ -87,7 +88,7 @@ sub from_fqdn_to_url {
 sub check_options {
     my ($self, %options) = @_;
 
-    $self->{$_} = $self->{option_results}->{$_} foreach qw(hostname port proto timeout auth_url api_path client_id client_secret);
+    $self->{$_} = $self->{option_results}->{$_} foreach qw(hostname port proto timeout auth_url api_path client_id client_secret cache_lifetime);
     $self->{output}->option_exit(short_msg => "Mandatory option 'auth-url' is missing for OneAPI authentication.") if ($self->{auth_url} eq '');
 
     $self->{auth_url} = from_fqdn_to_url($self->{auth_url});
@@ -161,6 +162,11 @@ sub request_devices {
 
     $self->get_token();
 
+    my $dt_current = DateTime->now(time_zone => 'UTC');
+    my $dt_end = DateTime->new(year => $dt_current->year, month => $dt_current->month, day => $dt_current->day, hour => $dt_current->hour, minute => 0, second => 0, time_zone => 'UTC');
+    my $end = $dt_end->iso8601.'Z';
+    my $start = $dt_end->subtract(hours => 2)->iso8601.'Z';
+
     my @items = ();
     my $after = '';
 
@@ -191,10 +197,8 @@ sub request_devices {
                                     app_name { value }
                                     user_id { value }
                                     pft {
-                                        min
                                         avg
                                     }
-                                    synthetic_probe_score
                                 }
                             } 
                         }
@@ -202,8 +206,8 @@ sub request_devices {
                 }
             }',
             variables => {
-                from => '2026-11-02T12:00:00Z',
-                to   => '2026-11-02T14:00:00Z',
+                from => $start,
+                to   => $end,
                 first => 1000,
                 after => $after
             }
@@ -244,8 +248,7 @@ sub request_devices {
                     user_id => $_->{user_id}->{value},
                     app_name => $_->{app_name}->{value},
                     app_id => $_->{app_id}->{value},
-                    pft => $_->{pft},
-                    synthetic_probe_score => $_->{synthetic_probe_score}
+                    pft => $_->{pft}
                 };
             }
             
@@ -310,15 +313,142 @@ sub get_devices {
     return $self->request_devices();
 }
 
+sub filter_location {
+    my ($self, %options) = @_;
+
+    foreach (@{$options{users}}) {
+        if (!is_empty($options{location_id})) {
+            return 0 if ($_->{loc_id} eq $options{location_id});
+
+            return 1;
+        }
+      
+        next if is_excluded(
+            $_->{loc_name},
+            $options{include_location_name},
+            $options{exclude_location_name});
+
+        return 0;
+    }
+
+    return 1;
+}
+
 sub get_apps {
     my ($self, %options) = @_;
 
     my $devices = $self->get_devices();
+
+    my $apps = {};
+    foreach my $dev (@$devices) {
+        next if ($self->filter_location(%options, users => $dev->{user_info}));
+
+        my $user_increment = {};
+
+        foreach (@{$dev->{app_metrics}}) {
+            next if (!is_empty($options{application_id}) && $options{application_id} ne $_->{app_id});
+            next if is_excluded(
+                $_->{app_name},
+                $options{include_application_name},
+                $options{exclude_application_name});
+
+            if (!defined($apps->{ $_->{app_id} })) {
+                $apps->{ $_->{app_id} } = {
+                    id          => $_->{app_id},
+                    name        => $_->{app_name},
+                    score       => -1,
+                    score_count => 0,
+                    total_users => 0,
+                    pft         => -1,
+                    pft_count   => 0
+                };
+            }
+
+            $apps->{ $_->{app_id} }->{score} = 0
+                if ($apps->{ $_->{app_id} }->{score} == -1);
+
+            $apps->{ $_->{app_id} }->{score} +=  $_->{zdx_score};
+            $apps->{ $_->{app_id} }->{score_count}++;
+            $apps->{ $_->{app_id} }->{total_users}++;
+            $user_increment->{ $_->{app_id} } = 1;
+        }
+
+        foreach (@{$dev->{web_app_metrics}}) {
+            next if (!is_empty($options{application_id}) && $options{application_id} ne $_->{app_id});
+            next if is_excluded(
+                $_->{app_name},
+                $options{include_application_name},
+                $options{exclude_application_name});
+
+            if (!defined($apps->{ $_->{app_id} })) {
+                $apps->{ $_->{app_id} } = {
+                    id          => $_->{app_id},
+                    name        => $_->{app_name},
+                    score       => -1,
+                    score_count => 0,
+                    total_users => 0,
+                    pft         => -1,
+                    pft_count   => 0
+                };
+            }
+
+            $apps->{ $_->{app_id} }->{pft} = 0
+                if ($apps->{ $_->{app_id} }->{pft} == -1);
+
+            $apps->{ $_->{app_id} }->{pft} +=  $_->{pft}->{avg};
+            $apps->{ $_->{app_id} }->{pft_count}++;
+            
+            $apps->{ $_->{app_id} }->{total_users}++
+                if (!defined($user_increment->{ $_->{app_id} }));
+           
+            $user_increment->{ $_->{app_id} } = 1;
+        }
+    }
+
+    my $stats = [];
+    foreach (values(%$apps)) {
+        my $stat = {
+            id          => $_->{id},
+            name        => $_->{name},
+            score       => $_->{score},
+            total_users => $_->{total_users},
+            pft         => $_->{pft}
+        };
+
+        $stat->{pft} = sprintf('%.2f', $stat->{pft} / $_->{pft_count})
+            if ($_->{pft_count} > 0);
+        $stat->{score} = sprintf('%.2f', $stat->{score} / $_->{score_count})
+            if ($_->{score_count} > 0);
+
+        push @$stats, $stat;
+    }
+
+    push @$stats, {
+            id          => $options{application_id} // -1,
+            name        => $options{include_application_name} //"not found",
+            score       => -1,
+            total_users => 0
+        } unless @$stats;
+
+    return $stats;
 }
 
 sub get_locations {
     my ($self, %options) = @_;
 
+    my $devices = $self->get_devices();
+
+    my $result = {};
+    foreach my $dev (@$devices) {
+        foreach (@{$dev->{user_info}}) {
+            $result->{ $_->{loc_id} } = {
+                id   => $_->{loc_id},
+                name => $_->{loc_name}
+            } if (!defined($result->{ $_->{loc_id} }));
+       }
+    }
+
+    return [values %$result];
 }
 
 1;

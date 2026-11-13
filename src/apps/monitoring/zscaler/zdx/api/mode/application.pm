@@ -121,9 +121,15 @@ sub manage_selection {
         $self->{application}->{ $app->{name} } = {
             name        => $app->{name},
             score       => $app->{score},
-            total_users => $app->{total_users},
-            pft         => $app->{pft}
+            total_users => $app->{total_users}
         };
+
+        if (defined($app->{pft}) && $app->{pft} == -1) {
+            $self->{output}->add_option_msg(long_msg => 'metric "pft" is skipped for app "' . $app->{name} . '" because its value is -1');
+            next;
+        }
+
+        $self->{application}->{ $app->{name} }->{pft} = $app->{pft};
     }
 
     return 1;
