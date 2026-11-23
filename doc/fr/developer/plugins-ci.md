@@ -15,10 +15,9 @@ flowchart TD
     UT --> FP[fatpacker]
     FP --> PKG[package\n8 distributions]
     PKG --> TP[test-plugins\n9 distributions]
-    TP --> DP[deliver-packages\n8 distributions]
+    TP --> DP[deliver-packages-pulp\n8 distributions]
     DP --> SKIP[set-skip-label]
 
-    FP --> DS[deliver-sources\nstable uniquement]
     ENV --> RT[release-tag\nstable uniquement]
 
     DP --> JIRA[create-jira-nightly-ticket\nen cas d'échec uniquement]
@@ -33,7 +32,6 @@ flowchart TD
     style PKG fill:#1b5e20,color:#fff
     style TP fill:#1b5e20,color:#fff
     style DP fill:#e65100,color:#fff
-    style DS fill:#e65100,color:#fff
     style RT fill:#e65100,color:#fff
     style SKIP fill:#4a148c,color:#fff
     style JIRA fill:#b71c1c,color:#fff
@@ -206,7 +204,7 @@ En cas d'échec, le fichier `lastlog.jsonl` est uploadé comme artifact.
 
 Produit des scripts Perl autonomes (un par plugin) en regroupant toutes les dépendances dans un fichier exécutable unique grâce à [App::FatPacker](https://metacpan.org/pod/App::FatPacker).
 
-**Requiert :** `package_plugins == 'True'` (au moins un plugin à builder)
+**Requiert :** `package_plugins == 'True'` (au moins un plugin à builder) ET `stability != 'stable'`
 
 Étapes :
 1. Restaure `plugins.json` depuis le cache.
@@ -275,21 +273,15 @@ flowchart TD
 
 En cas d'échec, les logs et rapports Robot sont uploadés comme artifacts nommés `test-plugins-log-{distrib}-{arch}-{index}`.
 
-### `deliver-packages`
+### `deliver-packages-pulp`
 
-Envoie les paquets vers le dépôt Artifactory de Centreon.
+Livre les paquets dans le dépôt Pulp de Centreon (servi sur `packages.centreon.com`).
 
 **Conditions :**
 - `package_plugins == 'True'`
 - `stability` est `testing` ou `unstable`, **OU** `stability == 'stable'` avec un événement `push` (pas `workflow_dispatch`)
 
-Utilise l'action `package-delivery` avec le module `plugins` pour chaque distribution.
-
-### `deliver-sources`
-
-Envoie les fichiers de plugins fatpackés vers le serveur de téléchargement Centreon.
-
-**Conditions :** `stability == 'stable'` ET événement `push`
+Pour chaque distribution, utilise l'action `package-delivery-pulp` avec le module `plugins` en `testing` et `unstable`, et l'action `promote-to-stable-pulp` (promotion des paquets de `testing`) en `stable`. Les paquets livrés ou promus sont ensuite vérifiés sur Pulp : un paquet manquant fait échouer le job.
 
 ### `release-tag`
 
@@ -314,8 +306,8 @@ Crée automatiquement un ticket Jira si un run nightly échoue (`is_nightly == '
 | Clé | Contenu | Produit par | Consommé par |
 |---|---|---|---|
 | `plugins-{sha}-{run_id}` | `plugins.json` | `get-plugins` | `fatpacker`, `package`, `test-plugins` |
-| `fatpacked-plugins-{sha}-{run_id}` | Répertoire `build/` | `fatpacker` | `package`, `deliver-sources` |
-| `{sha}-{run_id}-{ext}-{distrib}` | Fichiers `.rpm` / `.deb` | `package` | `test-plugins`, `deliver-packages` |
+| `fatpacked-plugins-{sha}-{run_id}` | Répertoire `build/` | `fatpacker` | `package` |
+| `{sha}-{run_id}-{ext}-{distrib}` | Fichiers `.rpm` / `.deb` | `package` | `test-plugins`, `deliver-packages-pulp` |
 | `{image}-{sha}-{run_id}` | Archive tar de l'image Docker | `test-image-to-cache` | `robot-test` |
 
 ---
@@ -342,7 +334,6 @@ Crée automatiquement un ticket Jira si un run nightly échoue (`is_nightly == '
 sequenceDiagram
     actor Dev as Développeur
     participant GH as GitHub Actions
-    participant ART as Artifactory
 
     Dev->>GH: Ouvrir/mettre à jour la PR
 
@@ -365,14 +356,14 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant GH as GitHub Actions
-    participant ART as Artifactory
+    participant PULP as Pulp
 
     GH->>GH: get-environment (stability=unstable, tous les plugins reconstruits)
     GH->>GH: unit-tests
     GH->>GH: fatpacker
     GH->>GH: package
     GH->>GH: test-plugins
-    GH->>ART: deliver-packages (dépôt unstable)
+    GH->>PULP: deliver-packages-pulp (dépôt unstable)
     GH->>GH: set-skip-label
 ```
 
@@ -381,13 +372,10 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant GH as GitHub Actions
-    participant ART as Artifactory
-    participant DL as Serveur de téléchargement
+    participant PULP as Pulp
 
     GH->>GH: get-environment (stability=stable)
-    GH->>GH: fatpacker (pas de unit-tests, pas de package)
-    GH->>ART: deliver-packages (dépôt stable)
-    GH->>DL: deliver-sources
+    GH->>PULP: deliver-packages-pulp (promotion de testing vers stable)
     GH->>GH: release-tag (plugins-YYYYMMDD)
 ```
 

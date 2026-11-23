@@ -15,10 +15,9 @@ flowchart TD
     UT --> FP[fatpacker]
     FP --> PKG[package\n8 distributions]
     PKG --> TP[test-plugins\n9 distributions]
-    TP --> DP[deliver-packages\n8 distributions]
+    TP --> DP[deliver-packages-pulp\n8 distributions]
     DP --> SKIP[set-skip-label]
 
-    FP --> DS[deliver-sources\nstable only]
     ENV --> RT[release-tag\nstable only]
 
     DP --> JIRA[create-jira-nightly-ticket\non failure only]
@@ -33,7 +32,6 @@ flowchart TD
     style PKG fill:#1b5e20,color:#fff
     style TP fill:#1b5e20,color:#fff
     style DP fill:#e65100,color:#fff
-    style DS fill:#e65100,color:#fff
     style RT fill:#e65100,color:#fff
     style SKIP fill:#4a148c,color:#fff
     style JIRA fill:#b71c1c,color:#fff
@@ -206,7 +204,7 @@ On failure, the file `lastlog.jsonl` is uploaded as an artifact.
 
 Produces standalone Perl scripts (one per plugin) by bundling all dependencies into a single executable file using [App::FatPacker](https://metacpan.org/pod/App::FatPacker).
 
-**Requires:** `package_plugins == 'True'` (at least one plugin to build)
+**Requires:** `package_plugins == 'True'` (at least one plugin to build) AND `stability != 'stable'`
 
 Steps:
 1. Restores `plugins.json` from cache.
@@ -275,21 +273,15 @@ flowchart TD
 
 On failure, logs and Robot reports are uploaded as artifacts named `test-plugins-log-{distrib}-{arch}-{index}`.
 
-### `deliver-packages`
+### `deliver-packages-pulp`
 
-Uploads packages to the Centreon Artifactory repository.
+Delivers packages to the Centreon Pulp repository (served on `packages.centreon.com`).
 
 **Conditions:**
 - `package_plugins == 'True'`
 - `stability` is `testing` or `unstable`, **OR** `stability == 'stable'` with a `push` event (not `workflow_dispatch`)
 
-Uses the `package-delivery` action with the `plugins` module name for each distribution.
-
-### `deliver-sources`
-
-Uploads the fatpacked plugin files to the Centreon download server.
-
-**Conditions:** `stability == 'stable'` AND event is `push`
+For each distribution, uses the `package-delivery-pulp` action with the `plugins` module name on `testing` and `unstable`, and the `promote-to-stable-pulp` action (promotion of the `testing` packages) on `stable`. The delivered or promoted packages are then verified on Pulp, and a missing package fails the job.
 
 ### `release-tag`
 
@@ -314,8 +306,8 @@ Automatically creates a Jira ticket if a nightly run fails (`is_nightly == 'true
 | Key | Content | Produced by | Consumed by |
 |---|---|---|---|
 | `plugins-{sha}-{run_id}` | `plugins.json` | `get-plugins` | `fatpacker`, `package`, `test-plugins` |
-| `fatpacked-plugins-{sha}-{run_id}` | `build/` directory | `fatpacker` | `package`, `deliver-sources` |
-| `{sha}-{run_id}-{ext}-{distrib}` | `.rpm` / `.deb` files | `package` | `test-plugins`, `deliver-packages` |
+| `fatpacked-plugins-{sha}-{run_id}` | `build/` directory | `fatpacker` | `package` |
+| `{sha}-{run_id}-{ext}-{distrib}` | `.rpm` / `.deb` files | `package` | `test-plugins`, `deliver-packages-pulp` |
 | `{image}-{sha}-{run_id}` | Docker image tar | `test-image-to-cache` | `robot-test` |
 
 ---
@@ -342,7 +334,6 @@ Automatically creates a Jira ticket if a nightly run fails (`is_nightly == 'true
 sequenceDiagram
     actor Dev as Developer
     participant GH as GitHub Actions
-    participant ART as Artifactory
 
     Dev->>GH: Open/update PR
 
@@ -365,14 +356,14 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant GH as GitHub Actions
-    participant ART as Artifactory
+    participant PULP as Pulp
 
     GH->>GH: get-environment (stability=unstable, all plugins rebuilt)
     GH->>GH: unit-tests
     GH->>GH: fatpacker
     GH->>GH: package
     GH->>GH: test-plugins
-    GH->>ART: deliver-packages (unstable repo)
+    GH->>PULP: deliver-packages-pulp (unstable repo)
     GH->>GH: set-skip-label
 ```
 
@@ -381,13 +372,10 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant GH as GitHub Actions
-    participant ART as Artifactory
-    participant DL as Download server
+    participant PULP as Pulp
 
     GH->>GH: get-environment (stability=stable)
-    GH->>GH: fatpacker (no unit-tests, no package)
-    GH->>ART: deliver-packages (stable repo)
-    GH->>DL: deliver-sources
+    GH->>PULP: deliver-packages-pulp (promote testing to stable)
     GH->>GH: release-tag (plugins-YYYYMMDD)
 ```
 
