@@ -1,5 +1,5 @@
 #
-# Copyright 2018 Centreon (http://www.centreon.com/)
+# Copyright 2026-Present Centreon (http://www.centreon.com/)
 #
 # Centreon is a full-fledged industry-strength solution that meets
 # the needs in IT infrastructure and application monitoring for
@@ -25,23 +25,36 @@ use base qw(centreon::plugins::templates::counter);
 use strict;
 use warnings;
 use centreon::plugins::statefile;
-use centreon::plugins::templates::catalog_functions qw(catalog_status_threshold catalog_status_calc);
+use centreon::plugins::templates::catalog_functions qw(catalog_status_threshold_ng);
+use centreon::plugins::constants qw/:counters :values/;
+use centreon::plugins::constants qw(:counters :values);
+use centreon::plugins::misc qw(is_empty is_not_empty is_excluded);
 
 sub custom_status_output {
     my ($self, %options) = @_;
     
-    my $msg = sprintf("alert [severity: %s] [host: %s] [name: %s] %s", $self->{result_values}->{severity},
-        $self->{result_values}->{host}, $self->{result_values}->{name}, $self->{result_values}->{timeraised});
-    return $msg;
+    return sprintf(
+        'alert [severity: %s] [host: %s] [name: %s] %s',
+        $self->{result_values}->{severity},
+        $self->{result_values}->{host},
+        $self->{result_values}->{name},
+        $self->{result_values}->{timeraised}
+    );
+}
+
+sub prefix_global_output {
+    my ($self, %options) = @_;
+    
+    return 'Resolution state ';
 }
 
 sub set_counters {
     my ($self, %options) = @_;
 
     $self->{maps_counters_type} = [
-        { name => 'global', type => 0, cb_prefix_output => 'prefix_global_output' },
-        { name => 'alarms', type => 2, message_multiple => '0 problem(s) detected', display_counter_problem => { nlabel => 'alerts.problems.current.count', min => 0 },
-          group => [ { name => 'alarm', skipped_code => { -11 => 1 } } ] 
+        { name => 'global', type => COUNTER_TYPE_GLOBAL, cb_prefix_output => 'prefix_global_output' },
+        { name => 'alarms', type => COUNTER_TYPE_GROUP, message_multiple => '0 problem(s) detected', display_counter_problem => { nlabel => 'alerts.problems.current.count', min => 0 },
+          group => [ { name => 'alarm' } ] 
         }
     ];
 
@@ -54,41 +67,41 @@ sub set_counters {
                 key_values => [ { name => $_ } ],
                 output_template => $_ . ': %s',
                 perfdatas => [
-                    { value => $_ , template => '%s', min => 0 },
-                ],
+                    { value => $_ , template => '%s', min => 0 }
+                ]
             }
         };
     }
 
     $self->{maps_counters}->{alarm} = [
-        { label => 'status', threshold => 0, set => {
-                key_values => [ { name => 'host' }, { name => 'name' },
-                    { name => 'severity' }, { name => 'timeraised' } ],
-                closure_custom_calc => \&catalog_status_calc,
+        {
+            label => 'status',
+            type => COUNTER_KIND_TEXT,
+            warning_default => '%{severity} =~ /warning/i',
+            critical_default => '%{severity} =~ /critical/i',
+            set => {
+                key_values => [
+                    { name => 'host' }, { name => 'name' },
+                    { name => 'severity' }, { name => 'timeraised' }
+                ],
                 closure_custom_output => $self->can('custom_status_output'),
                 closure_custom_perfdata => sub { return 0; },
-                closure_custom_threshold_check => \&catalog_status_threshold,
+                closure_custom_threshold_check => \&catalog_status_threshold_ng
             }
-        },
+        }
     ];
-}
-
-sub prefix_global_output {
-    my ($self, %options) = @_;
-    
-    return 'Resolution state ';
 }
 
 sub new {
     my ($class, %options) = @_;
     my $self = $class->SUPER::new(package => __PACKAGE__, %options, force_new_perfdata => 1);
     bless $self, $class;
-    
+
     $options{options}->add_options(arguments => {
-        'filter-host:s'       => { name => 'filter_host' },
-        'warning-status:s'    => { name => 'warning_status', default => '%{severity} =~ /warning/i' },
-        'critical-status:s'   => { name => 'critical_status', default => '%{severity} =~ /critical/i' },
-        'memory'              => { name => 'memory' },
+        'include-host:s' => { name => 'include_host', default => '' },
+        'exclude-host:s' => { name => 'exclude_host', default => '' },
+        'filter-host:s'  => { name => 'filter_host' }, # legacy
+        'memory'         => { name => 'memory' }
     });
 
     $self->{statefile_cache} = centreon::plugins::statefile->new(%options);
@@ -99,24 +112,27 @@ sub check_options {
     my ($self, %options) = @_;
     $self->SUPER::check_options(%options);
 
-    $self->change_macros(macros => ['warning_status', 'critical_status']);
     if (defined($self->{option_results}->{memory})) {
         $self->{statefile_cache}->check_options(%options);
     }
+
+    # Compatibility: --filter-host
+    $self->{option_results}->{include_host} = $self->{option_results}->{filter_host}
+        if (is_empty($self->{option_results}->{include_host}) && is_not_empty($self->{option_results}->{filter_host}));
 }
 
 sub manage_selection {
     my ($self, %options) = @_;
 
     $self->{global} = {
-        'new' => 0, 'closed' => 0, 'resolved' => 0, 'scheduled' => 0, 'awaiting_evidence' => 0, 'assigned_to_engineering' => 0, 'acknowledge' => 0,
+        'new' => 0, 'closed' => 0, 'resolved' => 0, 'scheduled' => 0, 'awaiting_evidence' => 0, 'assigned_to_engineering' => 0, 'acknowledge' => 0
     };
     $self->{alarms}->{global} = { alarm => {} };
     my $results = $options{custom}->get_alerts();
 
     my $alerts_mem;
     if (defined($self->{option_results}->{memory})) {
-        $self->{statefile_cache}->read(statefile => "cache_scom_" . $options{custom}->get_hostname()  . '_' . $options{custom}->get_port(). '_' . $self->{mode});
+        $self->{statefile_cache}->read(statefile => 'cache_scom_' . $options{custom}->get_hostname()  . '_' . $options{custom}->get_port(). '_' . $self->{mode});
         $alerts_mem = $self->{statefile_cache}->get(name => 'alerts');
     }
 
@@ -129,13 +145,9 @@ sub manage_selection {
             $alerts_mem->{$alert_id} = 1;
         }
 
-        if (defined($self->{option_results}->{filter_host}) && $self->{option_results}->{filter_host} ne '' &&
-            $results->{$alert_id}->{monitoringobjectdisplayname} !~ /$self->{option_results}->{filter_host}/) {
-            $self->{output}->output_add(long_msg => "skipping '" . $results->{$alert_id}->{monitoringobjectdisplayname} . "': no matching filter.", debug => 1);
-            next;
-        }
+        next if (is_excluded($results->{$alert_id}->{host}, $self->{option_results}->{include_host}, $self->{option_results}->{exclude_host}, output => $self->{output}));
 
-        $self->{global}->{$results->{$alert_id}->{resolutionstate}}++;
+        $self->{global}->{ $results->{$alert_id}->{resolutionstate} }++;
         $self->{alarms}->{global}->{alarm}->{$alert_id} = { %{$results->{$alert_id}} };
     }
 
@@ -162,9 +174,17 @@ Check alerts.
 
 =over 8
 
+=item B<--include-host>
+
+Filter alerts to include according to hosts (can be a regexp).
+
+=item B<--exclude-host>
+
+Filter alerts to exclude according to their host (can be a regexp).
+
 =item B<--filter-host>
 
-Filter by host name (can be a regexp).
+DEPRECATED: use C<--include-host> instead.
 
 =item B<--warning-status>
 

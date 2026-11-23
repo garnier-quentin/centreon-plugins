@@ -1,5 +1,5 @@
 #
-# Copyright 2024 Centreon (http://www.centreon.com/)
+# Copyright 2026-Present Centreon (http://www.centreon.com/)
 #
 # Centreon is a full-fledged industry-strength solution that meets
 # the needs in IT infrastructure and application monitoring for
@@ -29,12 +29,11 @@ sub new {
     my $self = $class->SUPER::new(package => __PACKAGE__, %options);
     bless $self, $class;
 
-    $self->{version} = '1.0';
-    %{$self->{modes}} = (
-        'alerts'    => 'apps::monitoring::scom::restapi::mode::alerts',
-    );
+    $self->{modes} = {
+        'alerts' => 'apps::monitoring::scom::restapi::mode::alerts'
+    };
                         
-    $self->{custom_modes}{api} = 'apps::monitoring::scom::restapi::custom::api';
+    $self->{custom_modes}->{api} = 'apps::monitoring::scom::restapi::custom::api';
     return $self;
 }
 
@@ -44,8 +43,8 @@ __END__
 
 =head1 PLUGIN DESCRIPTION
 
-Check SCOM with Rest API. 
-Compatible SCOM 2012 and 2016 with api: https://gallery.technet.microsoft.com/System-Center-Operations-5d88527c
-Not compatible SCOM 1801 (soon)
+Check SCOM with Rest API.
+Compatible SCOM 2012, 2016 and 2019 with api: https://gallery.technet.microsoft.com/System-Center-Operations-5d88527c
+Not compatible SCOM 1801.
 
 =cut
