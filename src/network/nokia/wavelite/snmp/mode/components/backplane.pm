@@ -22,7 +22,7 @@ package network::nokia::wavelite::snmp::mode::components::backplane;
 
 use strict;
 use warnings;
-use network::alcatel::omniswitch::snmp::mode::components::resources qw(%oids $mapping);
+use network::nokia::wavelite::snmp::mode::components::resources qw(%oids $mapping);
 
 sub load {}
 

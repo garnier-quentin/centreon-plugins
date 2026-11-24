@@ -319,13 +319,13 @@ sub custom_add_result {
     # unit 0.1 dBm
     if (defined($self->{results}->{$oid_optical_input_power . '.' . $options{instance}}) &&
         $self->{results}->{$oid_optical_input_power . '.' . $options{instance}} =~ /(-?\d+(?:\.?\d+)?)/) {
-        $self->{int}->{ $options{instance} }->{input_power} = $1 * 10;
+        $self->{int}->{ $options{instance} }->{input_power} = $1 / 10;
     }
 
     # unit 0.1 dBm
     if (defined($self->{results}->{$oid_optical_output_power . '.' . $options{instance}}) &&
         $self->{results}->{$oid_optical_output_power . '.' . $options{instance}} =~ /(-?\d+(?:\.?\d+)?)/) {
-        $self->{int}->{ $options{instance} }->{output_power} = $1 * 10;
+        $self->{int}->{ $options{instance} }->{output_power} = $1 / 10;
     }
 }
 
