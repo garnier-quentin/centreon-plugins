@@ -1,0 +1,214 @@
+#
+# Copyright 2026-Present Centreon (http://www.centreon.com/)
+#
+# Centreon is a full-fledged industry-strength solution that meets
+# the needs in IT infrastructure and application monitoring for
+# service performance.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+package apps::captchetat::api::custom::api;
+
+use strict;
+use warnings;
+use centreon::plugins::http;
+use centreon::plugins::statefile;
+use Digest::SHA qw(sha256_hex);
+use centreon::plugins::misc qw(json_decode is_empty value_of is_excluded);
+
+sub new {
+    my ($class, %options) = @_;
+    my $self = {};
+    bless $self, $class;
+
+    if (!defined($options{output})) {
+        print "Class Custom: Need to specify 'output' argument.\n";
+        exit 3;
+    }
+    if (!defined($options{options})) {
+        $options{output}->add_option_msg(short_msg => "Class Custom: Need to specify 'options' argument.");
+        $options{output}->option_exit();
+    }
+
+    if (!defined($options{noptions})) {
+        $options{options}->add_options(arguments => {
+            'auth-url:s'      => { name => 'auth_url', default => 'https://oauth.piste.gouv.fr/api/oauth/token' },
+            'client-id:s'     => { name => 'client_id', default => '' },
+            'client-secret:s' => { name => 'client_secret', default => '' },
+            'api-path:s'      => { name => 'api_path', default => '/piste/captchetat/v2' },
+            'hostname:s'      => { name => 'hostname', default => 'api.piste.gouv.fr' },
+            'port:s'          => { name => 'port', default => 443 },
+            'proto:s'         => { name => 'proto', default => 'https' },
+            'timeout:s'       => { name => 'timeout', default => 10 }
+        });
+    }
+    $options{options}->add_help(package => __PACKAGE__, sections => 'REST API OPTIONS', once => 1);
+
+    $self->{output} = $options{output};
+    $self->{http}   = centreon::plugins::http->new(%options, default_backend => 'curl');
+    $self->{cache}  = centreon::plugins::statefile->new(%options);
+
+    return $self;
+}
+
+sub set_defaults {}
+
+sub check_options {
+    my ($self, %options) = @_;
+
+    $self->{$_} = $self->{option_results}->{$_} foreach qw(hostname port proto timeout auth_url api_path client_id client_secret);
+    $self->{output}->option_exit(short_msg => "Mandatory option 'auth-url' is missing for authentication.") if ($self->{auth_url} eq '');
+
+    foreach (qw(client_id client_secret)) {
+        my $name = $_;
+        $name =~ s/_/-/g;
+        $self->{output}->option_exit(short_msg => "Mandatory option '$name' is missing for authentication.") if ($self->{$_} eq '');
+        $self->{output}->option_exit(short_msg => "Option '$name' contains illegal characters.") if ($self->{$_} =~ /([\b\f\n\r\t\"\\]+)/);
+    }
+
+    $self->{cache}->check_options(option_results => $self->{option_results});
+
+    return 0;
+}
+
+sub settings {
+    my ($self, %options) = @_;
+
+    $self->{http}->add_header(key => 'Accept', value => 'application/json');
+    $self->{http}->set_options(%{$self->{option_results}});
+}
+
+sub get_token {
+    my ($self, %options) = @_;
+
+    return $self->{token} if defined($self->{token});
+
+    $self->settings();
+
+    my $has_cache_file = $self->{cache}->read(
+        statefile => 'captchetat_token_' . sha256_hex(
+            $self->{auth_url}
+                . '_' . $self->{client_id})
+    );
+    # return token stored in cache if exists after checking it is still valid
+    if ($has_cache_file) {
+        my $expiration = $self->{cache}->get(name => 'expiration');
+        if (defined($expiration) && $expiration > time() + 60) {
+            $self->{token}      = $self->{cache}->get(name => 'token');
+            $self->{token_type} = $self->{cache}->get(name => 'token_type');
+            $self->{http}->add_header(key => 'Authorization', value => $self->{token_type} . ' ' . $self->{token});
+            return $self->{token}
+        }
+    }
+
+    # if we do not have a token or if it has to be renewed
+    my $content = $self->{http}->request(
+        method          => 'POST',
+        full_url        => $self->{auth_url},
+        post_params     => {
+            'client_id'     => $self->{client_id}, 
+            'client_secret' => $self->{client_secret}, 
+            'grant_type'    => 'client_credentials',
+            'scope'         => 'piste.captchetatv2'
+        }
+    );
+    my $decoded_content = json_decode($content, output => $self->{output});
+
+    $self->{output}->option_exit(short_msg => "No token found in '$content'")
+        unless ($decoded_content->{access_token} || $decoded_content->{token});
+    # store in $self for further requests
+    $self->{token}      = $decoded_content->{access_token} // $decoded_content->{token};
+    $self->{token_type} = $decoded_content->{token_type} // 'Bearer';
+    # store in cache for further executions
+    $self->{http}->add_header(key => 'Authorization', value => $self->{token_type} . ' ' . $self->{token});
+    $self->{cache}->write(data => { token => $self->{token}, token_type => $self->{token_type}, expiration => ($decoded_content->{expires_in} + time()) });
+
+    return $self->{token};
+}
+
+sub set_options {
+    my ($self, %options) = @_;
+
+    $self->{option_results} = $options{option_results};
+}
+
+sub get_healthcheck {
+    my ($self, %options) = @_;
+
+    $self->get_token();
+    my $health_json = $self->{http}->request(
+        method     => 'GET',
+        url_path   => $self->{api_path} . '/healthcheck'
+    );
+    return json_decode($health_json, output => $self->{output});
+
+}
+
+1;
+
+__END__
+
+=head1 NAME
+
+CaptchEtat Rest API
+
+=head1 SYNOPSIS
+
+Custom mode for CaptchEtat Rest API
+
+=head1 REST API OPTIONS
+
+CaptchEtat Rest API
+
+=over 8
+
+=item B<--auth-url>
+
+Authentication URL (or FQDN) to get a token from (default: C<https://oauth.piste.gouv.fr/api/oauth/token>). You should not need to change it.
+
+=item B<--hostname>
+
+API URL (default: C<api.piste.gouv.fr>). You should not need to change it.
+
+=item B<--port>
+
+API port (default: 443).
+
+=item B<--proto>
+
+Specify http if needed (default: 'https').
+
+=item B<--api-path>
+
+API URL path (default: '/piste/captchetat/v2')
+
+=item B<--client-id>
+
+Client ID for authentication.
+
+=item B<--client-secret>
+
+Client secret for authentication.
+
+=item B<--timeout>
+
+Define HTTP timeout.
+
+=back
+
+=head1 DESCRIPTION
+
+B<custom>.
+
+=cut

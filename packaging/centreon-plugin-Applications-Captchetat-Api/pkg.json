@@ -1,0 +1,9 @@
+{
+    "pkg_name": "centreon-plugin-Applications-Captchetat-Api",
+    "pkg_summary": "Centreon Plugin to monitor CaptchEtat service using the API",
+    "plugin_name": "centreon_captchetat_api.pl",
+    "files": [
+        "centreon/plugins/script_custom.pm",
+        "apps/captchetat/api/"
+    ]
+}
