@@ -36,11 +36,69 @@ jobs:
     with:
       version_file: rust-plugins/Cargo.toml
 
-  build:
+  lint:
     needs: [get-environment]
     if: |
       needs.get-environment.outputs.skip_workflow == 'false' &&
       needs.get-environment.outputs.stability != 'stable' &&
+      ! cancelled()
+    runs-on: ubuntu-24.04
+
+    name: "Lint the generic plugins"
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install pinned toolchain with fmt and clippy
+        run: |
+          rustup toolchain install 1.100 --profile minimal --component rustfmt,clippy
+          rustup default 1.100
+        shell: bash
+
+      # Fail fast when Cargo.lock does not match Cargo.toml, before any longer step: every later
+      # cargo command would otherwise silently rewrite the lockfile and build something else than
+      # what is committed.
+      - name: Check Cargo.lock is up to date
+        run: |
+          cd rust-plugins
+          if ! cargo metadata --locked --format-version 1 > /dev/null; then
+            echo "::error file=rust-plugins/Cargo.lock::Cargo.lock is out of date with Cargo.toml: run 'cargo update --workspace' in rust-plugins and commit Cargo.lock"
+            exit 1
+          fi
+        shell: bash
+
+      # rustfmt.toml uses options that are only available on the nightly channel (comment_width,
+      # wrap_comments, imports_granularity, trailing_comma): a stable rustfmt ignores them with a
+      # warning. Only the formatting runs on nightly, pinned to a date so that the result does not
+      # change from one run to the next; the build, clippy and the tests stay on the pinned stable.
+      # The nightly is named in rust-plugins/rustfmt-toolchain.txt, shared with the pre-commit hook
+      # and rust-plugins/scripts/check.sh.
+      - name: Install pinned nightly rustfmt
+        run: |
+          NIGHTLY_TOOLCHAIN="$(< rust-plugins/rustfmt-toolchain.txt)"
+          echo "NIGHTLY_TOOLCHAIN=${NIGHTLY_TOOLCHAIN}" >> "${GITHUB_ENV}"
+          rustup toolchain install "${NIGHTLY_TOOLCHAIN}" --profile minimal --component rustfmt
+        shell: bash
+
+      - name: Check formatting
+        run: |
+          cd rust-plugins
+          cargo "+${NIGHTLY_TOOLCHAIN}" fmt --check
+        shell: bash
+
+      - name: Clippy
+        run: |
+          cd rust-plugins
+          cargo clippy --all-targets --release -- -D warnings
+        shell: bash
+
+  build:
+    needs: [get-environment, lint]
+    if: |
+      needs.get-environment.outputs.skip_workflow == 'false' &&
+      needs.get-environment.outputs.stability != 'stable' &&
+      needs.lint.result == 'success' &&
       ! cancelled()
     strategy:
       fail-fast: false
@@ -60,10 +118,12 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # --all-targets also builds the benches, which run once in test mode: criterion, a
+      # bench-only dev-dependency, is otherwise reported as an unused dependency.
       - name: Unit tests
         run: |
           cd rust-plugins
-          cargo test
+          cargo test --all-targets
         shell: bash
 
       # The binary is built once per architecture and packaged for every supported distribution,
@@ -299,7 +359,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # package-delivery-pulp takes no arch input: each row simply restores the cache holding
+        # the package-delivery action takes no arch input: each row simply restores the cache holding
         # its own architecture and uploads it.
         include:
           - distrib: el8
@@ -344,7 +404,7 @@ jobs:
       - name: Deliver packages on Pulp
         if: ${{ contains(fromJson('["testing", "unstable"]'), needs.get-environment.outputs.stability) }}
         id: deliver_pulp
-        uses: ./.github/actions/package-delivery-pulp
+        uses: centreon/github-actions/pulp/package-delivery@pulp/v1
         with:
           module_name: generic-plugins
           repository_name: plugins
@@ -361,7 +421,7 @@ jobs:
       - name: Promote packages on Pulp
         if: ${{ needs.get-environment.outputs.stability == 'stable' && needs.get-environment.outputs.release_type != '' }}
         id: promote_pulp
-        uses: ./.github/actions/promote-to-stable-pulp
+        uses: centreon/github-actions/pulp/promote-to-stable@pulp/v1
         with:
           module_name: generic-plugins
           repository_name: plugins
